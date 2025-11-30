@@ -1,42 +1,211 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+/* src/App.css - 最终修复版 */
+
+/* --- 1. 全局变量 --- */
+:root {
+  --primary: #4f46e5;       
+  --primary-hover: #4338ca;
+  --bg-color: #f3f4f6;      
+  --card-bg: #ffffff;       
+  --text-main: #111827;     
+  --text-light: #6b7280;    
+  --border: #e5e7eb;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --radius: 16px;           
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+/* --- 2. 基础重置  --- */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--bg-color);
+  background-image: linear-gradient(to bottom, #f3f4f6, #e5e7eb); 
+  color: var(--text-main);
+  min-height: 100vh;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+* { box-sizing: border-box; }
+
+/* --- 3. App 顶层容器 --- */
+.app-container {
+  max-width: 1200px; 
+  margin: 0 auto; 
+  padding: 20px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* --- 4. 导航栏  --- */
+.nav-bar {
+  background: var(--card-bg);
+  padding: 15px 30px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  justify-content: space-between; 
+  align-items: center;
+  margin-bottom: 30px;
+}
+.logo { font-weight: 800; font-size: 1.2rem; color: var(--primary); }
+.nav-links a {
+  text-decoration: none;
+  color: var(--text-light);
+  margin-left: 15px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+.nav-links a:hover, .nav-links a.active {
+  color: var(--primary);
+  background-color: #eef2ff;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+/* --- ★★★ 5. 布局包装器  ★★★ --- */
+.page-center-wrapper {
+  width: 100%;
+  padding-top: 10px; 
+  display: block; 
 }
 
+/* --- 6. 卡片通用样式 --- */
 .card {
-  padding: 2em;
+  background: var(--card-bg);
+  padding: 30px;
+  border-radius: 20px;
+  box-shadow: var(--shadow-md);
+  border: 1px solid white;
+}
+.card h2 { margin-top: 0; font-size: 1.5rem; margin-bottom: 20px; color: var(--text-main); }
+.card h3 { margin-top: 0; font-size: 1.1rem; color: #374151; margin-bottom: 15px; }
+
+/* --- 7. 表单与按钮 --- */
+input, textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 1rem;
+  margin-bottom: 15px;
+  background: #f9fafb;
+  font-family: inherit;
+}
+input:focus, textarea:focus { outline: none; border-color: var(--primary); background: white; }
+
+button {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-primary { background-color: var(--primary); color: white; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2); }
+.btn-primary:hover { background-color: var(--primary-hover); }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-light); }
+.btn-danger { background: #fee2e2; color: #dc2626; }
+
+/* --- 8. 首页 Dashboard --- */
+.dashboard-grid {
+  display: grid;
+  gap: 25px;
+  grid-template-columns: 1fr; 
+  width: 100%; /* 确保撑满 */
 }
 
-.read-the-docs {
-  color: #888;
+/* --- 9. 个人中心 (Profile) --- */
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1fr; /* 手机默认单列 */
+  gap: 20px;
+  /* ★关键：强制宽度100%，解决缩在左边的问题 */
+  width: 100%; 
+}
+
+/* 统计小卡片 */
+.stat-card {
+  background: #f8fafc;
+  padding: 20px 10px;
+  border-radius: 12px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.stat-number { font-size: 1.8rem; font-weight: 700; color: var(--primary); }
+.stat-label { font-size: 0.8rem; color: var(--text-light); margin-top: 5px; }
+
+/* --- 10. 设置页与登录页 --- */
+.card-settings {
+  width: 100%;
+  max-width: 600px;
+  /* ★关键：用 margin auto 来实现居中，而不是靠父级 flex */
+  margin: 0 auto; 
+}
+
+.auth-container {
+  width: 100%;
+  max-width: 400px;
+  margin: 40px auto; /* 顶部加点距离 */
+}
+
+.review-item {
+  background: #fdfdfd;
+  border: 1px solid var(--border);
+  padding: 15px;
+  border-radius: 12px;
+  margin-bottom: 15px;
+}
+.review-actions { display: flex; gap: 10px; margin-top: 10px; }
+
+
+/* --- ★★★ 11. PC端适配 (媒体查询) ★★★ --- */
+@media (min-width: 768px) {
+  
+  /* 导航栏更宽敞 */
+  .nav-bar { padding: 15px 40px; }
+
+  /* 首页：左列表，右录入 */
+  .dashboard-grid {
+    /* 比例调整：左边主要内容占2.5份，右边工具栏占1份 */
+    grid-template-columns: 2.5fr 1fr; 
+    align-items: start;
+  }
+  .section-add { order: 2; }
+  .section-list { order: 1; }
+
+  /* 个人中心：左信息，右数据 */
+  .profile-grid {
+    /* ★关键：强制撑满容器 */
+    width: 100%;
+    /* 左侧固定300px，右侧自动填满剩余空间 (1fr) */
+    grid-template-columns: 300px 1fr; 
+    align-items: start;
+  }
+}
+
+/* 12. 确保包装器本身是块级，占满全屏宽 */
+.page-center-wrapper {
+  width: 100%;
+  display: block; 
+  padding-top: 20px;
+}
+
+/* 13. 核心修复：选中 page-center-wrapper 直接子级的 .card */
+.page-center-wrapper > .card {
+  /* 强制左右外边距为 auto，这是 Block 布局下唯一的水平居中方式 */
+  margin-left: auto !important;
+  margin-right: auto !important;
+  
+  /* 稍微往下一点，视觉更舒服 */
+  margin-top: 20px; 
+}
+
+/* 14. 确保登录框不要太宽，也不要太窄 */
+.auth-container, 
+.page-center-wrapper > .card[style*="max-width: 400px"] {
+  /* 这里是为了兜底，确保之前的 inline style 也能配合 margin auto 生效 */
+  margin-left: auto !important;
+  margin-right: auto !important;
 }
