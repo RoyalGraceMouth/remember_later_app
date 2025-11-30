@@ -209,3 +209,105 @@ button {
   margin-left: auto !important;
   margin-right: auto !important;
 }
+
+/* --- 15. 日历组件样式 --- */
+/* src/App.css */
+.calendar-wrapper {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--border);
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between; /* 两端对齐 */
+  align-items: center; /* 垂直居中 */
+  margin-bottom: 15px;
+  padding: 0 10px; /* 加点内边距 */
+}
+
+/* 修复按钮过宽的问题 */
+.calendar-header button {
+  width: auto !important; /* 强制覆盖全局的 width: 100% */
+  padding: 6px 12px;
+  margin: 0;
+  flex-shrink: 0; /* 禁止被挤压 */
+  font-size: 0.9rem;
+}
+
+/* 修复日期文字折行的问题 */
+.calendar-title {
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--text-main);
+  white-space: nowrap; /* 禁止换行！ */
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px; /* 稍微增加一点间距，不那么拥挤 */
+  text-align: center;
+}
+
+.calendar-cell {
+  height: 40px; 
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center; /* 确保垂直水平居中 */
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  position: relative; /* 关键 */
+  transition: all 0.2s;
+  color: var(--text-main);
+  border: 1px solid transparent;
+  z-index: 1; /* 建立层级 */
+}
+
+
+.calendar-cell:hover {
+  background-color: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.calendar-cell.selected {
+  background-color: var(--primary);
+  color: #ffffff !important; 
+  font-weight: bold;
+  box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.3);
+  opacity: 1;
+}
+
+.calendar-cell.selected::after {
+  z-index: -1; 
+}
+
+.calendar-cell.is-today {
+  color: var(--primary);
+  font-weight: bold;
+}
+.calendar-cell.is-today:not(.selected) {
+  border: 1px solid var(--primary);
+}
+
+/* 任务提示点 */
+.task-dot {
+  width: 4px;
+  height: 4px;
+  background-color: #ef4444; /* 红色 */
+  border-radius: 50%;
+  position: absolute;
+  bottom: 4px;
+}
+/* 预测未来的任务点 (用浅一点的颜色区分) */
+.task-dot.projected {
+  background-color: #94a3b8; /* 灰色 */
+}
+
+.calendar-cell.selected .task-dot {
+  background-color: white; /* 选中时变成白色 */
+}

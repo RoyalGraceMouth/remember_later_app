@@ -78,7 +78,7 @@ function App() {
         <Routes>
           <Route path="/" element={
             user ? (
-              <HomePage questions={questions} onAdd={addQuestion} onReview={handleReview} />
+              <HomePage questions={questions} onAdd={addQuestion} onReview={handleReview} settings={settings}/>
             ) : (
               <LoginPage onLogin={login} />
             )
@@ -125,10 +125,29 @@ function NavBar({ user }) {
 }
 
 // 2. 主页
-function HomePage({ questions, onAdd, onReview }) {
+// --- 更新后的 HomePage ---
+// --- 更新后的 HomePage 组件 ---
+function HomePage({ questions, onAdd, onReview, settings }) {
   const [inputContent, setInputContent] = useState("");
+  const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
   const today = dayjs().format('YYYY-MM-DD');
-  const reviewsDue = questions.filter(q => q.nextReviewDate <= today);
+  
+  // 判断当前视图是否为未来
+  const isFutureView = selectedDate > today;
+
+  // ★ 核心逻辑修改：列表筛选 ★
+  const reviewsDue = questions.filter(q => {
+    if (selectedDate === today) {
+      // 今天：显示截止到今天所有没做的 (补作业逻辑)
+      return q.nextReviewDate <= today;
+    } else {
+      // 未来：显示“选中日期”在“题目预测时间线”上的题目
+      // 也就是说，虽然这道题下次复习是12月1号，但如果我点12月15号，
+      // 而根据算法 12月15号 也是它的第N次复习日，那也要显示出来！
+      const timeline = calculateTimeline(q, settings);
+      return timeline.has(selectedDate);
+    }
+  });
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -137,40 +156,70 @@ function HomePage({ questions, onAdd, onReview }) {
     setInputContent("");
   };
 
+  const dateTitle = selectedDate === today ? "今日任务" : `${selectedDate} 的规划`;
+
   return (
     <div className="dashboard-grid">
-      
-      {/* 区域 A：复习列表*/}
       <section className="card section-list">
-        <h2>📚 今日任务 ({reviewsDue.length})</h2>
+        <h2>📚 {dateTitle} ({reviewsDue.length})</h2>
+        
         {reviewsDue.length === 0 ? (
-          <div style={{textAlign: 'center', padding: '40px', color: '#888'}}>
-            <p>🎉 今天没有需要复习的题目！</p>
-            <p>去添加一点新知识吧。</p>
+          <div style={{textAlign: 'center', padding: '30px', color: '#888'}}>
+            <p>{isFutureView ? "这一天不在任何题目的复习计划上" : "🎉 任务清空！"}</p>
           </div>
         ) : (
-          <div>
+          <div style={{marginBottom: '20px'}}>
             {reviewsDue.map(q => (
               <div key={q.id} className="review-item">
-                <div style={{whiteSpace: 'pre-wrap'}}>{q.content}</div>
-                <div className="review-actions">
-                  <button className="btn-outline" style={{borderColor:'#ef4444', color:'#ef4444'}} onClick={() => onReview(q.id, false)}>
-                    忘了 (退步)
-                  </button>
-                  <button className="btn-primary" style={{background:'#22c55e'}} onClick={() => onReview(q.id, true)}>
-                    记得 (保持)
-                  </button>
-                </div>
-                <div style={{fontSize: '12px', color: '#999', marginTop: '5px'}}>
-                  当前等级: Lv.{q.streak}
+                <div style={{whiteSpace: 'pre-wrap', marginBottom: '10px'}}>{q.content}</div>
+                
+                {isFutureView ? (
+                  // 未来视图：只显示信息，不显示操作
+                  <div style={{
+                    padding: '8px', 
+                    background: '#f8fafc', 
+                    borderRadius: '6px', 
+                    border: '1px dashed #cbd5e1',
+                    fontSize: '0.85rem', 
+                    color: '#64748b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '5px'
+                  }}>
+                    <span>🔮 预测: 这是第 {q.streak + calculateStreakDiff(q, selectedDate, settings)} 次复习节点</span>
+                  </div>
+                ) : (
+                  // 今天视图：显示操作按钮
+                  <div className="review-actions">
+                    <button className="btn-outline" style={{borderColor:'#ef4444', color:'#ef4444'}} onClick={() => onReview(q.id, false)}>
+                      忘了
+                    </button>
+                    <button className="btn-primary" style={{background:'#22c55e'}} onClick={() => onReview(q.id, true)}>
+                      记得
+                    </button>
+                  </div>
+                )}
+
+                <div style={{fontSize: '12px', color: '#999', marginTop: '8px', display:'flex', justifyContent:'space-between'}}>
+                   {/* 如果是未来，显示原本的下次日期作为对比 */}
+                   <span>当前等级: Lv.{q.streak}</span>
+                   {isFutureView && <span>(原定下次: {q.nextReviewDate})</span>}
                 </div>
               </div>
             ))}
           </div>
         )}
+
+        <Calendar 
+          questions={questions} 
+          settings={settings}
+          selectedDate={selectedDate} 
+          onDateSelect={setSelectedDate} 
+        />
       </section>
 
-      {/* 区域 B：录入框*/}
+      {/* 右侧部分不变 */}
       <section className="card section-add">
         <h2>✏️ 快速录入</h2>
         <form onSubmit={handleSubmit}>
@@ -182,17 +231,38 @@ function HomePage({ questions, onAdd, onReview }) {
           />
           <button type="submit" className="btn-primary">添加错题</button>
         </form>
-        
-        <div style={{marginTop: '20px', padding: '15px', background: '#f1f5f9', borderRadius: '8px'}}>
+         <div style={{marginTop: '20px', padding: '15px', background: '#f1f5f9', borderRadius: '8px'}}>
           <h4>📊 统计概览</h4>
           <p>错题总数: {questions.length}</p>
-          {/* 这里以后可以加日历热力图 */}
         </div>
       </section>
-
     </div>
   );
 }
+
+// 辅助函数：计算未来某天是第几次复习（用于显示“第N次复习节点”）
+function calculateStreakDiff(question, targetDate, settings) {
+  let tempStreak = question.streak;
+  let currentDateObj = dayjs(question.nextReviewDate);
+  let count = 1; // 至少是下一次
+
+  if (targetDate === currentDateObj.format('YYYY-MM-DD')) return 1;
+
+  while (true) {
+    tempStreak++;
+    if (tempStreak >= settings.intervals.length) break;
+    
+    const daysToAdd = settings.intervals[tempStreak];
+    currentDateObj = currentDateObj.add(daysToAdd, 'day');
+    count++;
+    
+    if (currentDateObj.format('YYYY-MM-DD') === targetDate) {
+      return count;
+    }
+  }
+  return 1; // Fallback
+}
+
 
 // 3. 登录页
 function LoginPage({ onLogin }) {
@@ -381,6 +451,111 @@ function SettingsPage({ settings, setSettings }) {
         </div>
 
         <button className="btn-primary" onClick={handleSave}>保存所有更改</button>
+      </div>
+    </div>
+  );
+}
+// --- 提取出来的日历核心预测算法 ---
+// 作用：根据题目当前的 streak 和 settings，算出未来所有的复习日期点
+const calculateTimeline = (question, settings) => {
+  const dates = new Set();
+  
+  // 1. 放入当前的下一次复习日期 (这是确定的起点)
+  let currentDateObj = dayjs(question.nextReviewDate);
+  dates.add(currentDateObj.format('YYYY-MM-DD'));
+
+  // 2. 模拟未来 (只要还没把 settings.intervals 跑完，就继续算)
+  // 我们从当前的 streak 开始往后推
+  let tempStreak = question.streak;
+
+  while (true) {
+    // 假设下一次做对了，等级+1
+    tempStreak++;
+
+    // ★ 关键逻辑修改：如果等级超过了设置数组的长度，就停止预测
+    // 比如 intervals = [14, 21, 28]，长度是3
+    // streak 0 -> 用14天
+    // streak 1 -> 用21天
+    // streak 2 -> 用28天
+    // streak 3 -> 越界了，不显示了，循环结束
+    if (tempStreak >= settings.intervals.length) {
+      break; 
+    }
+
+    const daysToAdd = settings.intervals[tempStreak];
+    currentDateObj = currentDateObj.add(daysToAdd, 'day');
+    dates.add(currentDateObj.format('YYYY-MM-DD'));
+  }
+
+  return dates;
+};
+
+// 6. 日历组件
+function Calendar({ questions, settings, selectedDate, onDateSelect }) {
+  const [currentDate, setCurrentDate] = useState(dayjs(selectedDate));
+
+  // 计算所有题目的“所有未来日期”
+  const taskMap = (() => {
+    const map = new Set();
+    questions.forEach(q => {
+      // 对每一道题，计算它的整个生命周期
+      const timeline = calculateTimeline(q, settings);
+      timeline.forEach(date => map.add(date));
+    });
+    return map;
+  })();
+
+  const nextMonth = () => setCurrentDate(currentDate.add(1, 'month'));
+  const prevMonth = () => setCurrentDate(currentDate.subtract(1, 'month'));
+  const jumpToToday = () => {
+    const today = dayjs().format('YYYY-MM-DD');
+    setCurrentDate(dayjs());
+    onDateSelect(today);
+  };
+
+  const startOfMonth = currentDate.startOf('month');
+  const daysInMonth = currentDate.daysInMonth();
+  const startDay = startOfMonth.day(); 
+  
+  const daysArray = [];
+  for (let i = 0; i < startDay; i++) daysArray.push({ type: 'empty', id: `empty-${i}` });
+  
+  for (let i = 1; i <= daysInMonth; i++) {
+    const dateStr = currentDate.date(i).format('YYYY-MM-DD');
+    daysArray.push({ type: 'day', val: i, dateStr, hasTask: taskMap.has(dateStr) });
+  }
+
+  const weeks = ['日', '一', '二', '三', '四', '五', '六'];
+
+  return (
+    <div className="calendar-wrapper">
+      <div className="calendar-header">
+        <button onClick={prevMonth}>&lt;</button>
+        <span className="calendar-title" onClick={jumpToToday}>
+          {currentDate.format('YYYY年 MM月')}
+        </span>
+        <button onClick={nextMonth}>&gt;</button>
+      </div>
+
+      <div className="calendar-grid">
+        {weeks.map(w => <div key={w} className="calendar-day-label">{w}</div>)}
+        {daysArray.map(item => {
+          if (item.type === 'empty') return <div key={item.id} />;
+          
+          const isSelected = item.dateStr === selectedDate;
+          const isToday = item.dateStr === dayjs().format('YYYY-MM-DD');
+
+          return (
+            <div 
+              key={item.dateStr} 
+              className={`calendar-cell ${isSelected ? 'selected' : ''} ${isToday ? 'is-today' : ''}`}
+              onClick={() => onDateSelect(item.dateStr)}
+            >
+              {item.val}
+              {item.hasTask && <div className={`task-dot ${item.dateStr > dayjs().format('YYYY-MM-DD') ? 'projected' : ''}`} />}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
