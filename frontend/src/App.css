@@ -616,3 +616,101 @@ select {
   margin-top: 20px;
 }
 
+/* src/App.css 追加 */
+
+/* --- 1. 拜占庭紫色毕业按钮 --- */
+.btn-graduate {
+  background-color: #f3e8ff; /* 极淡紫背景 */
+  color: #702963; /* 拜占庭紫 (Byzantine Purple) */
+  border: 1px solid rgba(112, 41, 99, 0.1);
+}
+
+.btn-graduate:hover {
+  background-color: #e9d5ff;
+  box-shadow: 0 4px 12px rgba(112, 41, 99, 0.3); /* 紫色光晕 */
+  transform: scale(1.05); /* 稍微放大，更显眼 */
+}
+
+/* --- 2. 数据库页面布局 --- */
+.database-header {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-bottom: 25px;
+}
+
+/* 苹果风搜索框 */
+.search-bar-wrapper {
+  position: relative;
+  width: 100%;
+  margin-bottom: 0; 
+}
+
+.search-input {
+  width: 100%;
+  height: 46px; /* ★ 强制固定高度，确保基准线稳定 */
+  padding: 0 12px 0 42px; /* 上下padding设为0，完全靠 line-height 或 flex 居中文字 */
+  border-radius: 12px;
+  margin-bottom: 0 !important; 
+  border: 1px solid var(--border);
+  background: #f1f5f9;
+  font-size: 0.95rem;
+  transition: all 0.2s;
+  /* 确保文字垂直居中 */
+  display: flex;
+  align-items: center; 
+}
+
+
+.search-icon {
+  position: absolute; /* 绝对定位 */
+  top: 50%;           /* 顶部距离 50% */
+  transform: translateY(-50%); /* 向上回退自身高度的 50%，实现完美几何居中 */
+  left: 14px;
+  color: #94a3b8;
+  z-index: 10;
+  pointer-events: none;
+  width: 18px; /* 显式设置宽高 */
+  height: 18px;
+}
+
+.search-input:focus {
+  background: white;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+  outline: none;
+}
+
+/* 分段控制器 (Segmented Control) - iOS风格 */
+.segmented-control {
+  display: flex;
+  background: #e2e8f0;
+  padding: 4px;
+  border-radius: 10px;
+  width: fit-content;
+}
+
+.segment-btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  background: transparent;
+}
+
+.segment-btn.active {
+  background: white;
+  color: var(--text-main);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* 数据库里的空状态 */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #94a3b8;
+}

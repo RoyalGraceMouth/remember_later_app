@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
 import './App.css'; 
-import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon } from 'lucide-react';
+import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon , GraduationCap} from 'lucide-react';
+import {Search,Database} from 'lucide-react';
 
 // --- 默认设置 ---
 const DEFAULT_SETTINGS_DATA = {
@@ -58,12 +59,60 @@ function App() {
   };
 
   // 更新题目 (内容 或 规则)
+  // ★★★ 修复版：修改题目内容或规则，并自动修正日期 ★★★
   const updateQuestion = (id, newContent, newSettingId) => {
     setQuestions(prev => prev.map(q => {
       if (q.id !== id) return q;
-      return { ...q, content: newContent, settingId: newSettingId };
+
+      // 1. 如果只改了文字，没改规则，直接返回
+      if (q.settingId === newSettingId) {
+        return { ...q, content: newContent };
+      }
+
+      // --- 2. 如果改了规则，开始计算“时差” ---
+      const oldProfile = getProfileById(q.settingId);
+      const newProfile = getProfileById(newSettingId);
+
+      // (安全检查：如果找不到规则，就不改日期，只改ID)
+      if (!oldProfile || !newProfile) {
+        return { ...q, content: newContent, settingId: newSettingId };
+      }
+
+      // 获取当前等级对应的“旧间隔”
+      // (注意：如果当前等级超过了规则长度，取最后一位)
+      const oldIndex = Math.min(q.streak, oldProfile.intervals.length - 1);
+      const oldDays = oldProfile.intervals[oldIndex] !== undefined ? oldProfile.intervals[oldIndex] : 1;
+
+      // 获取当前等级对应的“新间隔”
+      const newIndex = Math.min(q.streak, newProfile.intervals.length - 1);
+      const newDays = newProfile.intervals[newIndex] !== undefined ? newProfile.intervals[newIndex] : 1;
+
+      // 算出差值 (比如 3天变成了 7天，diff 就是 +4)
+      const diff = newDays - oldDays;
+
+      // 计算新的日期
+      const newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
+
+      console.log(`题目[${id}]切换规则: ${oldProfile.name} -> ${newProfile.name}, 日期修正: ${diff}天`);
+
+      // --- 3. 还有一种特殊情况：毕业状态 ---
+      // 如果新规则更短（比如旧规则只有1级已毕业，新规则有5级），可能需要“取消毕业”？
+      // 或者如果新规则更长，可能需要“立即毕业”？
+      // 这里为了简单稳健，我们暂时只修正日期，并重新检查一下毕业状态。
+      
+      const isNowGraduated = q.streak >= newProfile.intervals.length;
+
+      return {
+        ...q,
+        content: newContent,
+        settingId: newSettingId,    // 更新 ID
+        nextReviewDate: newDate,    // 更新 日期
+        isGraduated: isNowGraduated // 更新 毕业状态 (防止切换到短规则后状态不对)
+      };
     }));
   };
+
+  
 
   // 持久化
   useEffect(() => { localStorage.setItem('my_wrong_questions', JSON.stringify(questions)); }, [questions]);
@@ -107,28 +156,47 @@ function App() {
     setQuestions(prev => prev.map(q => {
       if (q.id !== id) return q;
 
-      // 1. 找到这道题对应的规则
+      // 1. 获取规则
       const profile = getProfileById(q.settingId);
       
       let newStreak = q.streak;
       
-      // 2. 只有今天的错题才能修改 streak (未来预测逻辑保持显示但不操作)
+      // 2. 计算新等级
       if (isCorrect) {
         newStreak = newStreak + 1;
       } else {
-        // 做错倒退，最少退回 0
+        // 做错倒退 (最低为0)
         newStreak = Math.max(0, newStreak - profile.regressStep);
       }
 
-      // 3. 统一查表计算日子 (不管对错，都查表)
-      // 如果 streak 超过了数组长度，就一直取最后一个
-      const intervalIndex = Math.min(newStreak, profile.intervals.length - 1);
-      const daysToAdd = profile.intervals[intervalIndex];
+      // ★★★ 核心修复：毕业判断 ★★★
+      // 这里的逻辑是：如果是 [0]，长度为1。
+      // 初始 streak=0。做对 -> newStreak=1。
+      // 1 >= 1，满足条件，触发毕业。
+      if (newStreak >= profile.intervals.length) {
+        return {
+          ...q,
+          streak: newStreak,
+          isGraduated: true, // ★ 标记为毕业
+          nextReviewDate: '🏁 已毕业' // 以后不再显示日期
+        };
+      }
 
-      // 4. 算出日期
+      // 3. 如果没毕业，继续计算下次日期
+      const intervalIndex = newStreak; 
+      // 注意：数组索引是从0开始的，intervals[0]对应streak0
+      // 这里的 intervalIndex 不需要 Math.min 锁死最后一位了，
+      // 因为上面已经拦截了毕业的情况。只要能走到这里，说明 newStreak 一定在数组范围内。
+      
+      const daysToAdd = profile.intervals[intervalIndex];
       const nextDate = dayjs().add(daysToAdd, 'day').format('YYYY-MM-DD');
 
-      return { ...q, streak: newStreak, nextReviewDate: nextDate };
+      return { 
+        ...q, 
+        streak: newStreak, 
+        nextReviewDate: nextDate,
+        isGraduated: false // 确保错题回炉重造时取消毕业状态
+      };
     }));
   };
 
@@ -159,6 +227,15 @@ function App() {
           } />
           <Route path="/profile" element={<ProfilePage user={user} questions={questions} onLogout={logout} />} />
           <Route path="/login" element={<LoginPage onLogin={login} />} />
+          <Route path="/database" element={
+            <DatabasePage 
+              questions={questions} 
+              onDelete={deleteQuestion} 
+              onUpdate={updateQuestion}
+              getProfileById={getProfileById}
+              settings={settings} // 记得传 settings 给它，因为编辑模态框需要
+            />
+          } />
         </Routes>
       </div>
     </BrowserRouter>
@@ -171,21 +248,17 @@ function App() {
 function NavBar({ user }) {
   return (
     <nav className="nav-bar">
-      <div className="logo">延时记 🧠</div>
+      <div className="logo">MyMemory 🧠</div>
       <div className="nav-links">
         {user ? (
           <>
             <Link to="/">复习面板</Link>
+            <Link to="/database">题库</Link> 
             <Link to="/settings">规则设置</Link>
-            <Link to="/profile">
-               我的 ({user.name})
-            </Link>
+            <Link to="/profile">我的 ({user.name})</Link>
           </>
         ) : (
-          <>
-            <Link to="/login">登录</Link>
-            <Link to="/register">注册</Link>
-          </>
+          <Link to="/login">登录</Link>
         )}
       </div>
     </nav>
@@ -243,6 +316,7 @@ function HomePage({ questions, onAdd, onReview, onDelete, onUpdate, settings, ge
                 onEdit={() => setEditingQ(q)} // 打开编辑框
                 onDelete={() => onDelete(q.id)} // 删除
                 profileName={getProfileById(q.settingId)?.name}
+                getProfileById={getProfileById} 
               />
             ))}
           </div>
@@ -322,22 +396,36 @@ function calculateStreakDiff(question, targetDate, settings) {
   return 1; // Fallback
 }
 
-function ReviewCard({ question, isFuture, onReview, onEdit, onDelete, profileName }) {
+function ReviewCard({ 
+  question, 
+  isFuture, 
+  onReview, 
+  onEdit, 
+  onDelete, 
+  getProfileById, // 必须传这个，用于判断是否毕业
+  readOnly = false // 新增：是否为只读模式（用于数据库页面）
+}) {
   const [showMenu, setShowMenu] = useState(false);
+  
+  // 1. 获取该题目的规则
+  const profile = getProfileById(question.settingId);
+  const profileName = profile?.name || '未知规则';
+  
+  // 2. ★★★ 核心逻辑：判断下一次点击是否毕业 ★★★
+  // 如果当前等级 + 1 >= 规则的总长度，说明点一下就通关了
+  const isNextGraduation = profile && (question.streak + 1 >= profile.intervals.length);
 
-  // 点击外部关闭菜单的简单处理：这里用 onMouseLeave 简化，或者点击别处关闭
   return (
     <div className="review-item" onMouseLeave={() => setShowMenu(false)}>
-      {/* 1. 右上角更多按钮 */}
+      {/* 菜单逻辑不变 */}
       <button className="more-btn" onClick={() => setShowMenu(!showMenu)}>
         <MoreHorizontal size={20} />
       </button>
 
-      {/* 2. 下拉菜单 */}
       {showMenu && (
         <div className="menu-dropdown">
           <div className="menu-item" onClick={() => { onEdit(); setShowMenu(false); }}>
-            <Edit2 size={16} /> 编辑 / 改规则
+            <Edit2 size={16} /> 编辑
           </div>
           <div className="menu-item delete" onClick={() => { onDelete(); setShowMenu(false); }}>
             <Trash2 size={16} /> 删除
@@ -345,22 +433,36 @@ function ReviewCard({ question, isFuture, onReview, onEdit, onDelete, profileNam
         </div>
       )}
 
-      {/* 3. 内容区 */}
+      {/* 题目内容 */}
       <div className="review-content" style={{whiteSpace: 'pre-wrap'}}>
         {question.content}
       </div>
 
-      {/* 4. 底部栏：左侧信息，右侧按钮 */}
       <div className="review-footer">
         <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
-          <span className="mini-tag">Lv.{question.streak}</span>
+          {/* 状态标签 */}
+          {question.isGraduated ? (
+            <span className="mini-tag" style={{background:'#f3e8ff', color:'#702963', fontWeight:'bold'}}>
+              🎓 已毕业
+            </span>
+          ) : (
+            <span className="mini-tag">Lv.{question.streak}</span>
+          )}
+          
           <span className="mini-tag">{profileName}</span>
-          {isFuture && <span className="mini-tag" style={{background:'#fef3c7', color:'#d97706'}}>预测: {question.nextReviewDate}</span>}
+          
+          {/* 如果是未来，显示预测时间 */}
+          {isFuture && !question.isGraduated && (
+            <span className="mini-tag" style={{background:'#fef3c7', color:'#d97706'}}>
+              {question.nextReviewDate}
+            </span>
+          )}
         </div>
 
-        {/* 按钮组：如果是未来，不显示按钮；如果是今天，显示 Apple Style 按钮 */}
-        {!isFuture && (
+        {/* 按钮区域逻辑 */}
+        {!readOnly && !isFuture && !question.isGraduated && (
           <div className="action-row">
+            {/* 忘了按钮 */}
             <button 
               className="icon-btn btn-forgot" 
               onClick={() => onReview(question.id, false)}
@@ -368,13 +470,30 @@ function ReviewCard({ question, isFuture, onReview, onEdit, onDelete, profileNam
             >
               <X size={24} strokeWidth={3} />
             </button>
-            <button 
-              className="icon-btn btn-remember" 
-              onClick={() => onReview(question.id, true)}
-              title="记得 (保持)"
-            >
-              <Check size={24} strokeWidth={3} />
-            </button>
+
+            {/* 记得按钮 vs 毕业按钮 */}
+            {isNextGraduation ? (
+              <button 
+                className="icon-btn btn-graduate" 
+                onClick={() => {
+                  // 这里可以加个礼花特效 alert，增加情绪价值
+                  // alert("🎉 恭喜！这道题通过了所有考验，光荣毕业！"); 
+                  onReview(question.id, true);
+                }}
+                title="点击毕业！(Byzantine Purple)"
+              >
+                {/* 🎓 毕业帽图标 */}
+                <GraduationCap size={24} strokeWidth={3} />
+              </button>
+            ) : (
+              <button 
+                className="icon-btn btn-remember" 
+                onClick={() => onReview(question.id, true)}
+                title="记得 (保持)"
+              >
+                <Check size={24} strokeWidth={3} />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -419,7 +538,109 @@ function EditModal({ question, settings, onClose, onSave }) {
   );
 }
 
-// 3. 登录页
+// 3. 数据库页
+function DatabasePage({ questions, onDelete, onUpdate, getProfileById, settings }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState("all"); // all, active, graduated
+  const [editingQ, setEditingQ] = useState(null); // 复用编辑功能
+
+  // 筛选逻辑
+  const filteredQuestions = questions.filter(q => {
+    // 1. 搜索匹配 (内容)
+    const matchesSearch = q.content.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // 2. 类型匹配
+    let matchesType = true;
+    if (filterType === 'active') matchesType = !q.isGraduated;
+    if (filterType === 'graduated') matchesType = q.isGraduated;
+
+    return matchesSearch && matchesType;
+  });
+
+  // 按时间倒序排列 (最新的在前面)
+  const sortedQuestions = [...filteredQuestions].sort((a, b) => b.id - a.id);
+
+  return (
+    <div className="dashboard-grid">
+      {/* 既然是数据库，我们就让它占满全宽，或者依然保持左侧主列表的布局 */}
+      <section className="card" style={{gridColumn: '1 / -1'}}> {/* 强制占满全宽 */}
+        <h2 style={{display:'flex', alignItems:'center', gap:'10px'}}>
+          <Database size={22} /> 错题博物馆
+          <span style={{fontSize:'0.9rem', color:'#999', fontWeight:'normal'}}>
+            (共 {questions.length} 题)
+          </span>
+        </h2>
+
+        {/* 顶部工具栏：搜索 + 筛选 */}
+        <div className="database-header">
+          <div className="search-bar-wrapper">
+            <Search className="search-icon" size={18} />
+            <input 
+              type="text" 
+              className="search-input"
+              placeholder="搜索题目内容..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
+
+          <div className="segmented-control">
+            <button 
+              className={`segment-btn ${filterType === 'all' ? 'active' : ''}`}
+              onClick={() => setFilterType('all')}
+            >
+              全部
+            </button>
+            <button 
+              className={`segment-btn ${filterType === 'active' ? 'active' : ''}`}
+              onClick={() => setFilterType('active')}
+            >
+              进行中
+            </button>
+            <button 
+              className={`segment-btn ${filterType === 'graduated' ? 'active' : ''}`}
+              onClick={() => setFilterType('graduated')}
+            >
+              🎓 已毕业
+            </button>
+          </div>
+        </div>
+
+        {/* 列表区域 */}
+        {sortedQuestions.length === 0 ? (
+          <div className="empty-state">
+            <p>📭 没有找到符合条件的题目</p>
+          </div>
+        ) : (
+          <div>
+            {sortedQuestions.map(q => (
+              <ReviewCard 
+                key={q.id} 
+                question={q} 
+                getProfileById={getProfileById}
+                onDelete={()=> onDelete(q.id)}
+                onEdit={() => setEditingQ(q)} // 复用编辑
+                readOnly={true} // ★ 开启只读模式，不显示复习按钮
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ★ 复用编辑模态框 ★ */}
+      {editingQ && (
+        <EditModal 
+          question={editingQ} 
+          settings={settings} 
+          onClose={() => setEditingQ(null)} 
+          onSave={onUpdate}
+        />
+      )}
+    </div>
+  );
+}
+
+// 4. 登录页
 function LoginPage({ onLogin }) {
   const [name, setName] = useState("");
   const navigate = useNavigate();
@@ -462,7 +683,7 @@ function LoginPage({ onLogin }) {
   );
 }
 
-// 4. 注册页
+// 5. 注册页
 function RegisterPage() {
   return (
     <div className="auth-container card">
@@ -478,7 +699,7 @@ function RegisterPage() {
   );
 }
 
-// 1. 个人中心：充实内容，拒绝留白
+// 6. 个人中心：充实内容，拒绝留白
 function ProfilePage({ user, questions, onLogout }) {
   const navigate = useNavigate();
   if (!user) { navigate('/login'); return null; }
@@ -552,7 +773,7 @@ function ProfilePage({ user, questions, onLogout }) {
   );
 }
 
-// 5. 设置页
+// 7. 设置页
 function SettingsPage({ settings, setSettings ,questions, setQuestions}) {
   const [activeId, setActiveId] = useState(settings.profiles[0].id);
   const activeProfile = settings.profiles.find(p => p.id === activeId) || settings.profiles[0];
@@ -772,7 +993,7 @@ const calculateTimeline = (question, profile) => {
   return dates;
 };
 
-// 6. 日历组件
+// 8. 日历组件
 function Calendar({ questions, selectedDate, onDateSelect, getProfileById }) {
   const [currentDate, setCurrentDate] = useState(dayjs(selectedDate));
 
