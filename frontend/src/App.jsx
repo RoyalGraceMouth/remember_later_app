@@ -4,16 +4,31 @@ import dayjs from 'dayjs';
 import './App.css'; 
 
 // --- 默认设置 ---
-const DEFAULT_SETTINGS = {
-  intervals: [14, 21, 28], 
-  regressStep: 1,          
+const DEFAULT_SETTINGS_DATA = {
+  // 存放所有的规则配置
+  profiles: [
+    { 
+      id: 'default_1', 
+      name: '默认算法 (推荐)', 
+      intervals: [1, 2, 4, 7, 15, 30], // 经典遗忘曲线
+      regressStep: 1 
+    },
+    { 
+      id: 'hard_mode', 
+      name: '魔鬼训练 (包含当日)', 
+      intervals: [0, 0, 1, 3, 7], // 0代表今天立刻再做一次
+      regressStep: 2 
+    }
+  ],
+  // 当前默认使用的规则 ID
+  defaultId: 'default_1'
 };
 
 function App() {
-  // 1. 用户登录状态 (模拟)
+  // 1. 用户状态
   const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem('my_app_user');
-    return savedUser ? JSON.parse(savedUser) : null;
+    const saved = localStorage.getItem('my_app_user');
+    return saved ? JSON.parse(saved) : null;
   });
 
   // 2. 错题数据
@@ -22,75 +37,110 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // 3. 设置数据
+  // 3. 设置数据 (结构大改)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('my_app_settings');
-    return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
+    // 如果是旧版数据（没有 profiles 字段），强制重置为新版，防止报错
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (!parsed.profiles) return DEFAULT_SETTINGS_DATA;
+      return parsed;
+    }
+    return DEFAULT_SETTINGS_DATA;
   });
 
-  // 持久化保存
+  // 持久化
   useEffect(() => { localStorage.setItem('my_wrong_questions', JSON.stringify(questions)); }, [questions]);
   useEffect(() => { localStorage.setItem('my_app_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { 
-    if (user) localStorage.setItem('my_app_user', JSON.stringify(user)); 
+    if (user) localStorage.setItem('my_app_user', JSON.stringify(user));
     else localStorage.removeItem('my_app_user');
   }, [user]);
 
-  // --- 业务逻辑 ---
-  const addQuestion = (content) => {
+  // --- 辅助函数：根据ID找配置 ---
+  const getProfileById = (id) => {
+    return settings.profiles.find(p => p.id === id) || settings.profiles.find(p => p.id === settings.defaultId);
+  };
+
+  // --- 核心业务逻辑 ---
+
+  // 添加错题：现在支持指定 settingId
+  const addQuestion = (content, settingId) => {
+    const targetId = settingId || settings.defaultId;
+    const profile = getProfileById(targetId);
+
+    // ★ 关键修复：不能用 || 1，因为 0 也是有效值
+    // 如果 intervals[0] 存在，就用它；否则默认 1
+    const firstInterval = profile.intervals[0] !== undefined ? profile.intervals[0] : 1;
+
     const newQ = {
       id: Date.now(),
       content: content,
       streak: 0,
-      nextReviewDate: dayjs().add(settings.intervals[0], 'day').format('YYYY-MM-DD'),
+      settingId: targetId,
+      // dayjs().add(0, 'day') 依然是今天，这样就修好了
+      nextReviewDate: dayjs().add(firstInterval, 'day').format('YYYY-MM-DD'),
     };
-    setQuestions(prev => [...prev, newQ]); // 使用函数式更新
+    
+    // 如果是今天复习，强制刷新一下列表（虽然 React 会自动做，但为了保险）
+    setQuestions(prev => [...prev, newQ]);
   };
 
+  // 复习逻辑 (完全重写，支持 0 天)
   const handleReview = (id, isCorrect) => {
     setQuestions(prev => prev.map(q => {
       if (q.id !== id) return q;
+
+      // 1. 找到这道题对应的规则
+      const profile = getProfileById(q.settingId);
       
       let newStreak = q.streak;
+      
+      // 2. 只有今天的错题才能修改 streak (未来预测逻辑保持显示但不操作)
       if (isCorrect) {
         newStreak = newStreak + 1;
       } else {
-        newStreak = Math.max(0, newStreak - settings.regressStep);
+        // 做错倒退，最少退回 0
+        newStreak = Math.max(0, newStreak - profile.regressStep);
       }
 
-      const intervalIndex = Math.min(newStreak, settings.intervals.length - 1);
-      const daysToAdd = settings.intervals[intervalIndex];
+      // 3. 统一查表计算日子 (不管对错，都查表)
+      // 如果 streak 超过了数组长度，就一直取最后一个
+      const intervalIndex = Math.min(newStreak, profile.intervals.length - 1);
+      const daysToAdd = profile.intervals[intervalIndex];
+
+      // 4. 算出日期
       const nextDate = dayjs().add(daysToAdd, 'day').format('YYYY-MM-DD');
 
       return { ...q, streak: newStreak, nextReviewDate: nextDate };
     }));
   };
 
-  // 登录/退出逻辑
-  const login = (username) => setUser({ name: username, avatar: '👤' });
+  // 登录退出
+  const login = (name) => setUser({ name, avatar: '👤' });
   const logout = () => setUser(null);
 
   return (
     <BrowserRouter>
       <div className="app-container">
         <NavBar user={user} />
-
         <Routes>
           <Route path="/" element={
             user ? (
-              <HomePage questions={questions} onAdd={addQuestion} onReview={handleReview} settings={settings}/>
-            ) : (
-              <LoginPage onLogin={login} />
-            )
+              <HomePage 
+                questions={questions} 
+                onAdd={addQuestion} 
+                onReview={handleReview} 
+                settings={settings} // 把整个 settings 传进去，方便日历预测
+                getProfileById={getProfileById} // 传个查找器给日历用
+              />
+            ) : <LoginPage onLogin={login} />
           } />
-          
-          <Route path="/settings" element={<SettingsPage settings={settings} setSettings={setSettings} />} />
-          
-          {/* 个人中心现在传递 questions，用于计算统计数据 */}
+          <Route path="/settings" element={
+            <SettingsPage settings={settings} setSettings={setSettings} />
+          } />
           <Route path="/profile" element={<ProfilePage user={user} questions={questions} onLogout={logout} />} />
-          
           <Route path="/login" element={<LoginPage onLogin={login} />} />
-          <Route path="/register" element={<RegisterPage />} />
         </Routes>
       </div>
     </BrowserRouter>
@@ -103,7 +153,7 @@ function App() {
 function NavBar({ user }) {
   return (
     <nav className="nav-bar">
-      <div className="logo">MyMemory 🧠</div>
+      <div className="logo">延时记 🧠</div>
       <div className="nav-links">
         {user ? (
           <>
@@ -125,26 +175,23 @@ function NavBar({ user }) {
 }
 
 // 2. 主页
-// --- 更新后的 HomePage ---
-// --- 更新后的 HomePage 组件 ---
-function HomePage({ questions, onAdd, onReview, settings }) {
+function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
   const [inputContent, setInputContent] = useState("");
+  // ★ 新增：录入时选中的规则ID
+  const [selectedProfileId, setSelectedProfileId] = useState(settings.defaultId);
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
   const today = dayjs().format('YYYY-MM-DD');
   
-  // 判断当前视图是否为未来
   const isFutureView = selectedDate > today;
 
-  // ★ 核心逻辑修改：列表筛选 ★
+  // 列表筛选逻辑 (支持预测)
   const reviewsDue = questions.filter(q => {
+    const profile = getProfileById(q.settingId);
     if (selectedDate === today) {
-      // 今天：显示截止到今天所有没做的 (补作业逻辑)
       return q.nextReviewDate <= today;
     } else {
-      // 未来：显示“选中日期”在“题目预测时间线”上的题目
-      // 也就是说，虽然这道题下次复习是12月1号，但如果我点12月15号，
-      // 而根据算法 12月15号 也是它的第N次复习日，那也要显示出来！
-      const timeline = calculateTimeline(q, settings);
+      // 预测逻辑：需要传入题目具体的 profile
+      const timeline = calculateTimeline(q, profile);
       return timeline.has(selectedDate);
     }
   });
@@ -152,7 +199,8 @@ function HomePage({ questions, onAdd, onReview, settings }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!inputContent.trim()) return;
-    onAdd(inputContent);
+    // 传入选中的规则 ID
+    onAdd(inputContent, selectedProfileId);
     setInputContent("");
   };
 
@@ -162,50 +210,29 @@ function HomePage({ questions, onAdd, onReview, settings }) {
     <div className="dashboard-grid">
       <section className="card section-list">
         <h2>📚 {dateTitle} ({reviewsDue.length})</h2>
-        
+        {/* ... 列表渲染代码与之前相同，省略重复 ... */}
         {reviewsDue.length === 0 ? (
-          <div style={{textAlign: 'center', padding: '30px', color: '#888'}}>
-            <p>{isFutureView ? "这一天不在任何题目的复习计划上" : "🎉 任务清空！"}</p>
+          <div style={{textAlign:'center', padding:'30px', color:'#888'}}>
+            {isFutureView ? "无计划" : "🎉 任务清空！"}
           </div>
         ) : (
           <div style={{marginBottom: '20px'}}>
             {reviewsDue.map(q => (
               <div key={q.id} className="review-item">
-                <div style={{whiteSpace: 'pre-wrap', marginBottom: '10px'}}>{q.content}</div>
-                
-                {isFutureView ? (
-                  // 未来视图：只显示信息，不显示操作
-                  <div style={{
-                    padding: '8px', 
-                    background: '#f8fafc', 
-                    borderRadius: '6px', 
-                    border: '1px dashed #cbd5e1',
-                    fontSize: '0.85rem', 
-                    color: '#64748b',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '5px'
-                  }}>
-                    <span>🔮 预测: 这是第 {q.streak + calculateStreakDiff(q, selectedDate, settings)} 次复习节点</span>
-                  </div>
-                ) : (
-                  // 今天视图：显示操作按钮
+                <div style={{whiteSpace: 'pre-wrap', marginBottom:'10px'}}>
+                  {q.content}
+                  <span style={{float:'right', fontSize:'0.7rem', background:'#eee', padding:'2px 6px', borderRadius:'4px', color:'#666'}}>
+                     {/* 显示该题使用了哪个规则 */}
+                     {getProfileById(q.settingId)?.name}
+                  </span>
+                </div>
+                {!isFutureView && (
                   <div className="review-actions">
-                    <button className="btn-outline" style={{borderColor:'#ef4444', color:'#ef4444'}} onClick={() => onReview(q.id, false)}>
-                      忘了
-                    </button>
-                    <button className="btn-primary" style={{background:'#22c55e'}} onClick={() => onReview(q.id, true)}>
-                      记得
-                    </button>
+                     <button className="btn-outline" style={{borderColor:'#ef4444', color:'#ef4444'}} onClick={() => onReview(q.id, false)}>忘了</button>
+                     <button className="btn-primary" style={{background:'#22c55e'}} onClick={() => onReview(q.id, true)}>记得</button>
                   </div>
                 )}
-
-                <div style={{fontSize: '12px', color: '#999', marginTop: '8px', display:'flex', justifyContent:'space-between'}}>
-                   {/* 如果是未来，显示原本的下次日期作为对比 */}
-                   <span>当前等级: Lv.{q.streak}</span>
-                   {isFutureView && <span>(原定下次: {q.nextReviewDate})</span>}
-                </div>
+                {/* ... 其他信息 ... */}
               </div>
             ))}
           </div>
@@ -213,16 +240,31 @@ function HomePage({ questions, onAdd, onReview, settings }) {
 
         <Calendar 
           questions={questions} 
-          settings={settings}
+          settings={settings} 
           selectedDate={selectedDate} 
           onDateSelect={setSelectedDate} 
+          getProfileById={getProfileById} // 传进去
         />
       </section>
 
-      {/* 右侧部分不变 */}
       <section className="card section-add">
         <h2>✏️ 快速录入</h2>
         <form onSubmit={handleSubmit}>
+          
+          {/* ★ 修改为 Tag 选择器 ★ */}
+          <span className="tag-label">选择策略:</span>
+          <div className="tag-selector">
+            {settings.profiles.map(p => (
+              <div 
+                key={p.id} 
+                className={`rule-tag ${selectedProfileId === p.id ? 'active' : ''}`}
+                onClick={() => setSelectedProfileId(p.id)}
+              >
+                {p.name}
+              </div>
+            ))}
+          </div>
+
           <textarea 
             value={inputContent}
             onChange={(e) => setInputContent(e.target.value)}
@@ -231,7 +273,8 @@ function HomePage({ questions, onAdd, onReview, settings }) {
           />
           <button type="submit" className="btn-primary">添加错题</button>
         </form>
-         <div style={{marginTop: '20px', padding: '15px', background: '#f1f5f9', borderRadius: '8px'}}>
+        
+        <div style={{marginTop: '20px', padding: '15px', background: '#f1f5f9', borderRadius: '8px'}}>
           <h4>📊 统计概览</h4>
           <p>错题总数: {questions.length}</p>
         </div>
@@ -399,108 +442,175 @@ function ProfilePage({ user, questions, onLogout }) {
 
 // 5. 设置页
 function SettingsPage({ settings, setSettings }) {
-  const [intervalStr, setIntervalStr] = useState(settings.intervals.join(','));
+  // 当前正在编辑的 profile ID
+  const [activeId, setActiveId] = useState(settings.profiles[0].id);
+  
+  const activeProfile = settings.profiles.find(p => p.id === activeId) || settings.profiles[0];
+  
+  // 编辑表单状态
+  const [formName, setFormName] = useState(activeProfile.name);
+  const [formIntervals, setFormIntervals] = useState(activeProfile.intervals.join(','));
+  const [formStep, setFormStep] = useState(activeProfile.regressStep);
 
+  // 当切换左侧列表时，更新表单数据
+  useEffect(() => {
+    setFormName(activeProfile.name);
+    setFormIntervals(activeProfile.intervals.join(','));
+    setFormStep(activeProfile.regressStep);
+  }, [activeProfile]);
+
+  // 新增规则
+  const handleAddProfile = () => {
+    const newId = `custom_${Date.now()}`;
+    const newProfile = {
+      id: newId,
+      name: "新规则",
+      intervals: [1, 3, 7],
+      regressStep: 1
+    };
+    setSettings({
+      ...settings,
+      profiles: [...settings.profiles, newProfile]
+    });
+    setActiveId(newId); // 自动选中新建的
+  };
+
+  // 保存当前修改
   const handleSave = () => {
-    const newIntervals = intervalStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-    setSettings({ ...settings, intervals: newIntervals });
-    alert('✅ 设置已更新');
+    const newIntervals = formIntervals.split(',')
+      .map(s => parseInt(s.trim()))
+      .filter(n => !isNaN(n)); // 允许 0
+
+    const updatedProfiles = settings.profiles.map(p => {
+      if (p.id === activeId) {
+        return {
+          ...p,
+          name: formName,
+          intervals: newIntervals,
+          regressStep: formStep
+        };
+      }
+      return p;
+    });
+
+    setSettings({ ...settings, profiles: updatedProfiles });
+    alert("✅ 规则已保存");
+  };
+
+  // 设为默认
+  const handleSetDefault = () => {
+    setSettings({ ...settings, defaultId: activeId });
+  };
+
+  // 删除规则
+  const handleDelete = () => {
+    if (settings.profiles.length <= 1) return alert("至少保留一个规则！");
+    if (activeId === settings.defaultId) return alert("无法删除默认规则，请先将其他规则设为默认。");
+    
+    if (window.confirm("确定删除吗？使用此规则的错题将可能会找不到对应配置（建议仅供测试使用）")) {
+      const newProfiles = settings.profiles.filter(p => p.id !== activeId);
+      setSettings({ ...settings, profiles: newProfiles });
+      setActiveId(newProfiles[0].id); // 选中第一个
+    }
   };
 
   return (
     <div className="page-center-wrapper">
-      <div className="card card-settings">
-        <h2 style={{textAlign: 'center', marginBottom: '30px'}}>⚙️ 算法规则设置</h2>
+      <div className="card" style={{width: '100%', maxWidth: '900px'}}>
+        <h2 style={{marginBottom: '20px'}}>⚙️ 算法配置管理</h2>
         
-        <div style={{marginBottom: '25px'}}>
-          <label style={{display:'block', marginBottom:'10px', fontWeight:'600', color: '#374151'}}>
-            记忆间隔序列 (天数)
-          </label>
-          <input 
-            type="text" 
-            value={intervalStr}
-            onChange={(e) => setIntervalStr(e.target.value)}
-            style={{fontSize: '1.1rem', letterSpacing: '1px'}}
-          />
-          <p style={{fontSize: '0.85rem', color: '#6b7280', marginTop: '8px', lineHeight: '1.5'}}>
-            逻辑：当做对时，依次采用上述间隔。<br/>
-            例如 14, 21, 28 表示：第1次对隔14天，第2次对隔21天...
-          </p>
-        </div>
+        <div className="settings-container">
+          {/* 左侧列表 */}
+          <div className="settings-sidebar">
+            <h4 style={{margin: '0 0 10px 0', color: '#666'}}>规则列表</h4>
+            {settings.profiles.map(p => (
+              <div 
+                key={p.id} 
+                className={`profile-item ${p.id === activeId ? 'active' : ''}`}
+                onClick={() => setActiveId(p.id)}
+              >
+                <span>{p.name}</span>
+                {p.id === settings.defaultId && <span className="badge-default">默认</span>}
+              </div>
+            ))}
+            <button className="btn-outline" onClick={handleAddProfile} style={{marginTop: 'auto'}}>+ 新建规则</button>
+          </div>
 
-        <div style={{marginBottom: '35px'}}>
-          <label style={{display:'block', marginBottom:'10px', fontWeight:'600', color: '#374151'}}>
-            遗忘惩罚 (倒退级数)
-          </label>
-          <div style={{
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '15px', 
-            background: '#f9fafb', 
-            padding: '10px', 
-            borderRadius: '8px',
-            border: '1px solid #e5e7eb'
-          }}>
-            <button className="btn-outline" style={{width: '50px'}} onClick={() => setSettings({...settings, regressStep: Math.max(1, settings.regressStep - 1)})}>-</button>
-            <span style={{fontSize: '1.1rem', fontWeight: 'bold', minWidth: '60px', textAlign: 'center'}}>
-              {settings.regressStep} 级
-            </span>
-            <button className="btn-outline" style={{width: '50px'}} onClick={() => setSettings({...settings, regressStep: settings.regressStep + 1})}>+</button>
-            <span style={{fontSize: '0.9rem', color: '#6b7280', marginLeft: 'auto'}}>做错题时，进度条倒退的格数</span>
+          {/* 右侧编辑 */}
+          <div className="settings-content">
+            <h4 style={{marginTop: 0}}>编辑: {activeProfile.name}</h4>
+            
+            <div style={{marginBottom: '15px'}}>
+              <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>规则名称</label>
+              <input type="text" value={formName} onChange={e => setFormName(e.target.value)} />
+            </div>
+
+            <div style={{marginBottom: '15px'}}>
+              <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>间隔序列 (允许填0，代表当天)</label>
+              <input type="text" value={formIntervals} onChange={e => setFormIntervals(e.target.value)} />
+              <p style={{fontSize:'0.8rem', color:'#888', margin:'5px 0'}}>
+                例如: 0, 1, 3, 7<br/>
+                第1次(0): 立即复习; 第2次(1): 隔1天...
+              </p>
+            </div>
+
+            <div style={{marginBottom: '20px'}}>
+              <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>做错倒退级数: {formStep}</label>
+              <input 
+                type="range" min="1" max="5" 
+                value={formStep} 
+                onChange={e => setFormStep(parseInt(e.target.value))} 
+                style={{width: '100%'}}
+              />
+            </div>
+
+            <div style={{display: 'flex', gap: '10px'}}>
+              <button className="btn-primary" onClick={handleSave}>保存修改</button>
+              {activeId !== settings.defaultId && (
+                <button className="btn-outline" onClick={handleSetDefault}>设为默认</button>
+              )}
+              <button className="btn-danger" onClick={handleDelete} style={{width: 'auto'}}>删除</button>
+            </div>
           </div>
         </div>
-
-        <button className="btn-primary" onClick={handleSave}>保存所有更改</button>
       </div>
     </div>
   );
 }
 // --- 提取出来的日历核心预测算法 ---
 // 作用：根据题目当前的 streak 和 settings，算出未来所有的复习日期点
-const calculateTimeline = (question, settings) => {
+const calculateTimeline = (question, profile) => {
   const dates = new Set();
-  
-  // 1. 放入当前的下一次复习日期 (这是确定的起点)
   let currentDateObj = dayjs(question.nextReviewDate);
   dates.add(currentDateObj.format('YYYY-MM-DD'));
 
-  // 2. 模拟未来 (只要还没把 settings.intervals 跑完，就继续算)
-  // 我们从当前的 streak 开始往后推
   let tempStreak = question.streak;
-
-  while (true) {
-    // 假设下一次做对了，等级+1
+  
+  // 安全限制：最多预测20次，防止死循环
+  for(let i=0; i<20; i++) {
     tempStreak++;
+    if (tempStreak >= profile.intervals.length) break;
 
-    // ★ 关键逻辑修改：如果等级超过了设置数组的长度，就停止预测
-    // 比如 intervals = [14, 21, 28]，长度是3
-    // streak 0 -> 用14天
-    // streak 1 -> 用21天
-    // streak 2 -> 用28天
-    // streak 3 -> 越界了，不显示了，循环结束
-    if (tempStreak >= settings.intervals.length) {
-      break; 
-    }
-
-    const daysToAdd = settings.intervals[tempStreak];
+    const daysToAdd = profile.intervals[tempStreak];
     currentDateObj = currentDateObj.add(daysToAdd, 'day');
     dates.add(currentDateObj.format('YYYY-MM-DD'));
   }
-
   return dates;
 };
 
 // 6. 日历组件
-function Calendar({ questions, settings, selectedDate, onDateSelect }) {
+function Calendar({ questions, selectedDate, onDateSelect, getProfileById }) {
   const [currentDate, setCurrentDate] = useState(dayjs(selectedDate));
 
-  // 计算所有题目的“所有未来日期”
+  // 预测算法：现在必须对每道题分别查找它的规则
   const taskMap = (() => {
     const map = new Set();
     questions.forEach(q => {
-      // 对每一道题，计算它的整个生命周期
-      const timeline = calculateTimeline(q, settings);
-      timeline.forEach(date => map.add(date));
+      const profile = getProfileById(q.settingId); // ★ 找对应的规则
+      if(profile) {
+        const timeline = calculateTimeline(q, profile);
+        timeline.forEach(date => map.add(date));
+      }
     });
     return map;
   })();
@@ -560,5 +670,6 @@ function Calendar({ questions, settings, selectedDate, onDateSelect }) {
     </div>
   );
 }
+
 
 export default App;

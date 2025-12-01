@@ -311,3 +311,128 @@ button {
 .calendar-cell.selected .task-dot {
   background-color: white; /* 选中时变成白色 */
 }
+
+/* src/App.css 追加部分 */
+
+/* --- 设置页面新布局 --- */
+.settings-container {
+  display: flex;
+  gap: 20px;
+  min-height: 400px;
+}
+
+/* 左侧：规则列表 */
+.settings-sidebar {
+  flex: 1;
+  border-right: 1px solid var(--border);
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-item {
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.profile-item:hover {
+  background-color: #f1f5f9;
+}
+
+.profile-item.active {
+  background-color: #eef2ff;
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.badge-default {
+  font-size: 0.75rem;
+  background: var(--primary);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* 右侧：编辑区域 */
+.settings-content {
+  flex: 2;
+  padding-left: 10px;
+}
+
+/* 移动端适配：设置页变垂直排列 */
+@media (max-width: 768px) {
+  .settings-container {
+    flex-direction: column;
+  }
+  .settings-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    padding-right: 0;
+  }
+  .settings-content {
+    padding-left: 0;
+  }
+}
+
+/* 下拉选择框样式 */
+select {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f9fafb;
+  font-size: 1rem;
+  margin-bottom: 15px;
+  outline: none;
+}
+
+/* src/App.css 追加 */
+
+/* --- Tag 选择器样式 --- */
+.tag-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.rule-tag {
+  padding: 6px 12px;
+  border-radius: 20px; /* 胶囊形状 */
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--text-light);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.rule-tag:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* 选中状态 */
+.rule-tag.active {
+  background-color: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.3);
+}
+
+.tag-label {
+  font-size: 0.85rem; 
+  color: #666; 
+  display: block; 
+  margin-bottom: 8px;
+}
