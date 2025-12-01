@@ -436,3 +436,183 @@ select {
   display: block; 
   margin-bottom: 8px;
 }
+
+/* src/App.css - Apple Style UI */
+
+/* --- 1. 卡片极简重构 --- */
+.review-item {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.04); /* 极淡的边框 */
+  padding: 20px;
+  border-radius: 16px; /* 大圆角 */
+  margin-bottom: 16px;
+  position: relative; /* 为了定位右上角的菜单 */
+  box-shadow: 0 2px 8px rgba(0,0,0,0.02); /* 只有一点点阴影，浮起感 */
+  transition: all 0.2s ease;
+}
+
+.review-item:hover {
+  box-shadow: 0 8px 16px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
+}
+
+.review-content {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: #333;
+  margin-bottom: 15px;
+  padding-right: 30px; /* 给右上角图标留位置 */
+}
+
+/* 底部信息栏 */
+.review-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #f5f5f7; /* Apple 灰 */
+}
+
+/* 标签样式 */
+.mini-tag {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  background: #f5f5f7;
+  color: #86868b;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* --- 2. 苹果风按钮组 (Action Buttons) --- */
+.action-row {
+  display: flex;
+  gap: 12px;
+}
+
+/* 圆形按钮基础 */
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%; /* 正圆 */
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+/* 忘了 (X) */
+.btn-forgot {
+  background-color: #fff2f2; /* 极淡红 */
+  color: #ff3b30; /* Apple Red */
+}
+.btn-forgot:hover {
+  background-color: #ffe5e5;
+  box-shadow: 0 4px 10px rgba(255, 59, 48, 0.2);
+}
+
+/* 记得 (Check) */
+.btn-remember {
+  background-color: #f2fff4; /* 极淡绿 */
+  color: #34c759; /* Apple Green */
+}
+.btn-remember:hover {
+  background-color: #e0fbe5;
+  box-shadow: 0 4px 10px rgba(52, 199, 89, 0.2);
+}
+
+/* --- 3. 右上角更多菜单 (...) --- */
+.more-btn {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  
+  width: 32px !important; 
+  height: 32px !important;
+  
+  background: transparent;
+  border: none;
+  color: #ccc;
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  padding: 0; 
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s;
+  z-index: 2; 
+}
+
+.more-btn:hover {
+  background-color: #f5f5f7;
+  color: #333; /* 悬停变深色 */
+}
+
+/* 菜单下拉框 (Dropdown) */
+.menu-dropdown {
+  position: absolute;
+  top: 40px;
+  right: 15px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  border: 1px solid #eee;
+  z-index: 10;
+  overflow: hidden;
+  min-width: 120px;
+  animation: fadeIn 0.15s ease;
+}
+
+.menu-item {
+  padding: 10px 15px;
+  font-size: 0.9rem;
+  color: #333;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.menu-item:hover { background-color: #f5f5f7; }
+.menu-item.delete { color: #ff3b30; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+/* --- 4. 编辑弹窗 (Modal) --- */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.3); /* 磨砂黑背景 */
+  backdrop-filter: blur(5px);   /* 毛玻璃特效 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  width: 90%;
+  max-width: 500px;
+  padding: 30px;
+  border-radius: 24px; /* 超大圆角 */
+  box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+  animation: popUp 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+
+@keyframes popUp { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+

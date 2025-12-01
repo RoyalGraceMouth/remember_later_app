@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
 import './App.css'; 
+import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon } from 'lucide-react';
 
 // --- 默认设置 ---
 const DEFAULT_SETTINGS_DATA = {
@@ -48,6 +49,21 @@ function App() {
     }
     return DEFAULT_SETTINGS_DATA;
   });
+
+    // 删除题目
+  const deleteQuestion = (id) => {
+    if (window.confirm("确定要删除这道错题吗？")) {
+      setQuestions(prev => prev.filter(q => q.id !== id));
+    }
+  };
+
+  // 更新题目 (内容 或 规则)
+  const updateQuestion = (id, newContent, newSettingId) => {
+    setQuestions(prev => prev.map(q => {
+      if (q.id !== id) return q;
+      return { ...q, content: newContent, settingId: newSettingId };
+    }));
+  };
 
   // 持久化
   useEffect(() => { localStorage.setItem('my_wrong_questions', JSON.stringify(questions)); }, [questions]);
@@ -133,6 +149,8 @@ function App() {
                 onReview={handleReview} 
                 settings={settings} // 把整个 settings 传进去，方便日历预测
                 getProfileById={getProfileById} // 传个查找器给日历用
+                onDelete={deleteQuestion}   
+                onUpdate={updateQuestion}   
               />
             ) : <LoginPage onLogin={login} />
           } />
@@ -175,23 +193,22 @@ function NavBar({ user }) {
 }
 
 // 2. 主页
-function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
+function HomePage({ questions, onAdd, onReview, onDelete, onUpdate, settings, getProfileById }) {
   const [inputContent, setInputContent] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState(settings.defaultId);
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
-  const today = dayjs().format('YYYY-MM-DD');
   
+  // 编辑模态框的状态
+  const [editingQ, setEditingQ] = useState(null); // 当前正在编辑的题目对象
+
+  const today = dayjs().format('YYYY-MM-DD');
   const isFutureView = selectedDate > today;
 
-  // 列表筛选逻辑
   const reviewsDue = questions.filter(q => {
     const profile = getProfileById(q.settingId);
-    if (selectedDate === today) {
-      return q.nextReviewDate <= today;
-    } else {
-      const timeline = calculateTimeline(q, profile);
-      return timeline.has(selectedDate);
-    }
+    if (selectedDate === today) return q.nextReviewDate <= today;
+    const timeline = calculateTimeline(q, profile);
+    return timeline.has(selectedDate);
   });
 
   const handleSubmit = (e) => {
@@ -206,32 +223,27 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
   return (
     <div className="dashboard-grid">
       <section className="card section-list">
-        <h2>📚 {dateTitle} ({reviewsDue.length})</h2>
+        <h2 style={{display:'flex', alignItems:'center', gap:'10px'}}>
+           <CalIcon size={20}/> {dateTitle} 
+           <span style={{fontSize:'0.9rem', color:'#999', fontWeight:'normal'}}>({reviewsDue.length})</span>
+        </h2>
+
         {reviewsDue.length === 0 ? (
-          <div style={{textAlign:'center', padding:'30px', color:'#888'}}>
-            {isFutureView ? "无计划" : "🎉 任务清空！"}
+          <div style={{textAlign:'center', padding:'40px', color:'#94a3b8'}}>
+            <p>{isFutureView ? "🍃 这一天没有复习计划" : "🎉 任务清空！去休息吧。"}</p>
           </div>
         ) : (
           <div style={{marginBottom: '20px'}}>
             {reviewsDue.map(q => (
-              <div key={q.id} className="review-item">
-                <div style={{whiteSpace: 'pre-wrap', marginBottom:'10px'}}>
-                  {q.content}
-                  <span style={{float:'right', fontSize:'0.7rem', background:'#eee', padding:'2px 6px', borderRadius:'4px', color:'#666'}}>
-                     {getProfileById(q.settingId)?.name}
-                  </span>
-                </div>
-                {!isFutureView && (
-                  <div className="review-actions">
-                     <button className="btn-outline" style={{borderColor:'#ef4444', color:'#ef4444'}} onClick={() => onReview(q.id, false)}>忘了</button>
-                     <button className="btn-primary" style={{background:'#22c55e'}} onClick={() => onReview(q.id, true)}>记得</button>
-                  </div>
-                )}
-                <div style={{fontSize: '12px', color: '#999', marginTop: '8px', display:'flex', justifyContent:'space-between'}}>
-                   <span>Lv.{q.streak}</span>
-                   {isFutureView && <span>(原定: {q.nextReviewDate})</span>}
-                </div>
-              </div>
+              <ReviewCard 
+                key={q.id} 
+                question={q} 
+                isFuture={isFutureView} 
+                onReview={onReview}
+                onEdit={() => setEditingQ(q)} // 打开编辑框
+                onDelete={() => onDelete(q.id)} // 删除
+                profileName={getProfileById(q.settingId)?.name}
+              />
             ))}
           </div>
         )}
@@ -245,20 +257,16 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
         />
       </section>
 
-      {/* 右侧：录入区 */}
+      {/* 右侧录入区 (保持不变) */}
       <section className="card section-add">
         <h2>✏️ 快速录入</h2>
         <form onSubmit={handleSubmit}>
-          
-          {/* 1. 先放输入框 */}
           <textarea 
             value={inputContent}
             onChange={(e) => setInputContent(e.target.value)}
             placeholder="输入题目内容..."
             rows="5"
           />
-
-          {/* 2. 再放规则 Tag 选择器 (UI调整) */}
           <div style={{marginTop: '10px', marginBottom: '15px'}}>
             <span className="tag-label">复习策略:</span>
             <div className="tag-selector">
@@ -269,16 +277,24 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
                   onClick={() => setSelectedProfileId(p.id)}
                 >
                   {p.name}
-                  {/* 如果是默认，加个小星号提示 */}
                   {p.id === settings.defaultId && ' *'}
                 </div>
               ))}
             </div>
           </div>
-
           <button type="submit" className="btn-primary">添加错题</button>
         </form>
       </section>
+
+      {/* ★ 编辑模态框 ★ */}
+      {editingQ && (
+        <EditModal 
+          question={editingQ} 
+          settings={settings} 
+          onClose={() => setEditingQ(null)} 
+          onSave={onUpdate}
+        />
+      )}
     </div>
   );
 }
@@ -306,6 +322,102 @@ function calculateStreakDiff(question, targetDate, settings) {
   return 1; // Fallback
 }
 
+function ReviewCard({ question, isFuture, onReview, onEdit, onDelete, profileName }) {
+  const [showMenu, setShowMenu] = useState(false);
+
+  // 点击外部关闭菜单的简单处理：这里用 onMouseLeave 简化，或者点击别处关闭
+  return (
+    <div className="review-item" onMouseLeave={() => setShowMenu(false)}>
+      {/* 1. 右上角更多按钮 */}
+      <button className="more-btn" onClick={() => setShowMenu(!showMenu)}>
+        <MoreHorizontal size={20} />
+      </button>
+
+      {/* 2. 下拉菜单 */}
+      {showMenu && (
+        <div className="menu-dropdown">
+          <div className="menu-item" onClick={() => { onEdit(); setShowMenu(false); }}>
+            <Edit2 size={16} /> 编辑 / 改规则
+          </div>
+          <div className="menu-item delete" onClick={() => { onDelete(); setShowMenu(false); }}>
+            <Trash2 size={16} /> 删除
+          </div>
+        </div>
+      )}
+
+      {/* 3. 内容区 */}
+      <div className="review-content" style={{whiteSpace: 'pre-wrap'}}>
+        {question.content}
+      </div>
+
+      {/* 4. 底部栏：左侧信息，右侧按钮 */}
+      <div className="review-footer">
+        <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+          <span className="mini-tag">Lv.{question.streak}</span>
+          <span className="mini-tag">{profileName}</span>
+          {isFuture && <span className="mini-tag" style={{background:'#fef3c7', color:'#d97706'}}>预测: {question.nextReviewDate}</span>}
+        </div>
+
+        {/* 按钮组：如果是未来，不显示按钮；如果是今天，显示 Apple Style 按钮 */}
+        {!isFuture && (
+          <div className="action-row">
+            <button 
+              className="icon-btn btn-forgot" 
+              onClick={() => onReview(question.id, false)}
+              title="忘了 (退步)"
+            >
+              <X size={24} strokeWidth={3} />
+            </button>
+            <button 
+              className="icon-btn btn-remember" 
+              onClick={() => onReview(question.id, true)}
+              title="记得 (保持)"
+            >
+              <Check size={24} strokeWidth={3} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EditModal({ question, settings, onClose, onSave }) {
+  const [content, setContent] = useState(question.content);
+  const [settingId, setSettingId] = useState(question.settingId);
+
+  const handleSave = () => {
+    onSave(question.id, content, settingId);
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <h3 style={{marginTop:0}}>✏️ 编辑错题</h3>
+        
+        <label style={{display:'block', marginBottom:'5px', color:'#666', fontSize:'0.9rem'}}>题目内容</label>
+        <textarea 
+          value={content} 
+          onChange={e => setContent(e.target.value)}
+          rows="5"
+        />
+
+        <label style={{display:'block', marginBottom:'5px', color:'#666', fontSize:'0.9rem', marginTop:'15px'}}>复习规则</label>
+        <select value={settingId} onChange={e => setSettingId(e.target.value)}>
+          {settings.profiles.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+
+        <div className="modal-actions">
+          <button className="btn-outline" onClick={onClose} style={{width:'auto'}}>取消</button>
+          <button className="btn-primary" onClick={handleSave} style={{width:'auto'}}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // 3. 登录页
 function LoginPage({ onLogin }) {
@@ -468,10 +580,41 @@ function SettingsPage({ settings, setSettings ,questions, setQuestions}) {
   };
 
   const handleSave = () => {
-    // 1. 解析新规则的间隔数组
-    const newIntervals = formIntervals.split(',')
-      .map(s => parseInt(s.trim()))
-      .filter(n => !isNaN(n));
+    // --- 1. 严格校验间隔序列 ---
+    const rawIntervals = formIntervals.split(/[,，\s]+/); // 支持中英文逗号、空格分隔
+    const newIntervals = [];
+    
+    for (let s of rawIntervals) {
+      if (!s.trim()) continue; // 跳过空字符
+      
+      const num = Number(s);
+      
+      // 校验 A: 必须是数字
+      if (isNaN(num)) {
+        return alert(`❌ 输入错误："${s}" 不是有效数字`);
+      }
+      // 校验 B: 必须是整数
+      if (!Number.isInteger(num)) {
+        return alert(`❌ 输入错误："${s}" 必须是整数，不能有小数`);
+      }
+      // 校验 C: 不能小于 0
+      if (num < 0) {
+        return alert(`❌ 输入错误："${s}" 不能是负数`);
+      }
+      // 校验 D: 防止过大 (比如限制在 10年以内，防止溢出)
+      if (num > 3650) {
+        return alert(`❌ 输入错误："${s}" 太大了，建议不要超过 3650 天`);
+      }
+      
+      newIntervals.push(num);
+    }
+
+    if (newIntervals.length === 0) {
+      return alert("❌ 至少需要设置一个间隔时间！");
+    }
+
+    // --- 2. 校验倒退步数 ---
+    if (formStep < 0) return alert("倒退步数不能小于 0");
 
     // 2. 准备更新 Settings
     const updatedProfiles = settings.profiles.map(p => {
@@ -701,6 +844,5 @@ function Calendar({ questions, selectedDate, onDateSelect, getProfileById }) {
     </div>
   );
 }
-
 
 export default App;
