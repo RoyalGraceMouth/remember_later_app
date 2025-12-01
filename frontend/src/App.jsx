@@ -137,7 +137,7 @@ function App() {
             ) : <LoginPage onLogin={login} />
           } />
           <Route path="/settings" element={
-            <SettingsPage settings={settings} setSettings={setSettings} />
+            <SettingsPage settings={settings} setSettings={setSettings} questions={questions} setQuestions={setQuestions}/>
           } />
           <Route path="/profile" element={<ProfilePage user={user} questions={questions} onLogout={logout} />} />
           <Route path="/login" element={<LoginPage onLogin={login} />} />
@@ -177,20 +177,18 @@ function NavBar({ user }) {
 // 2. 主页
 function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
   const [inputContent, setInputContent] = useState("");
-  // ★ 新增：录入时选中的规则ID
   const [selectedProfileId, setSelectedProfileId] = useState(settings.defaultId);
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
   const today = dayjs().format('YYYY-MM-DD');
   
   const isFutureView = selectedDate > today;
 
-  // 列表筛选逻辑 (支持预测)
+  // 列表筛选逻辑
   const reviewsDue = questions.filter(q => {
     const profile = getProfileById(q.settingId);
     if (selectedDate === today) {
       return q.nextReviewDate <= today;
     } else {
-      // 预测逻辑：需要传入题目具体的 profile
       const timeline = calculateTimeline(q, profile);
       return timeline.has(selectedDate);
     }
@@ -199,7 +197,6 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!inputContent.trim()) return;
-    // 传入选中的规则 ID
     onAdd(inputContent, selectedProfileId);
     setInputContent("");
   };
@@ -210,7 +207,6 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
     <div className="dashboard-grid">
       <section className="card section-list">
         <h2>📚 {dateTitle} ({reviewsDue.length})</h2>
-        {/* ... 列表渲染代码与之前相同，省略重复 ... */}
         {reviewsDue.length === 0 ? (
           <div style={{textAlign:'center', padding:'30px', color:'#888'}}>
             {isFutureView ? "无计划" : "🎉 任务清空！"}
@@ -222,7 +218,6 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
                 <div style={{whiteSpace: 'pre-wrap', marginBottom:'10px'}}>
                   {q.content}
                   <span style={{float:'right', fontSize:'0.7rem', background:'#eee', padding:'2px 6px', borderRadius:'4px', color:'#666'}}>
-                     {/* 显示该题使用了哪个规则 */}
                      {getProfileById(q.settingId)?.name}
                   </span>
                 </div>
@@ -232,7 +227,10 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
                      <button className="btn-primary" style={{background:'#22c55e'}} onClick={() => onReview(q.id, true)}>记得</button>
                   </div>
                 )}
-                {/* ... 其他信息 ... */}
+                <div style={{fontSize: '12px', color: '#999', marginTop: '8px', display:'flex', justifyContent:'space-between'}}>
+                   <span>Lv.{q.streak}</span>
+                   {isFutureView && <span>(原定: {q.nextReviewDate})</span>}
+                </div>
               </div>
             ))}
           </div>
@@ -243,41 +241,43 @@ function HomePage({ questions, onAdd, onReview, settings, getProfileById }) {
           settings={settings} 
           selectedDate={selectedDate} 
           onDateSelect={setSelectedDate} 
-          getProfileById={getProfileById} // 传进去
+          getProfileById={getProfileById} 
         />
       </section>
 
+      {/* 右侧：录入区 */}
       <section className="card section-add">
         <h2>✏️ 快速录入</h2>
         <form onSubmit={handleSubmit}>
           
-          {/* ★ 修改为 Tag 选择器 ★ */}
-          <span className="tag-label">选择策略:</span>
-          <div className="tag-selector">
-            {settings.profiles.map(p => (
-              <div 
-                key={p.id} 
-                className={`rule-tag ${selectedProfileId === p.id ? 'active' : ''}`}
-                onClick={() => setSelectedProfileId(p.id)}
-              >
-                {p.name}
-              </div>
-            ))}
-          </div>
-
+          {/* 1. 先放输入框 */}
           <textarea 
             value={inputContent}
             onChange={(e) => setInputContent(e.target.value)}
-            placeholder="输入题目、页码或概念..."
+            placeholder="输入题目内容..."
             rows="5"
           />
+
+          {/* 2. 再放规则 Tag 选择器 (UI调整) */}
+          <div style={{marginTop: '10px', marginBottom: '15px'}}>
+            <span className="tag-label">复习策略:</span>
+            <div className="tag-selector">
+              {settings.profiles.map(p => (
+                <div 
+                  key={p.id} 
+                  className={`rule-tag ${selectedProfileId === p.id ? 'active' : ''}`}
+                  onClick={() => setSelectedProfileId(p.id)}
+                >
+                  {p.name}
+                  {/* 如果是默认，加个小星号提示 */}
+                  {p.id === settings.defaultId && ' *'}
+                </div>
+              ))}
+            </div>
+          </div>
+
           <button type="submit" className="btn-primary">添加错题</button>
         </form>
-        
-        <div style={{marginTop: '20px', padding: '15px', background: '#f1f5f9', borderRadius: '8px'}}>
-          <h4>📊 统计概览</h4>
-          <p>错题总数: {questions.length}</p>
-        </div>
       </section>
     </div>
   );
@@ -441,25 +441,20 @@ function ProfilePage({ user, questions, onLogout }) {
 }
 
 // 5. 设置页
-function SettingsPage({ settings, setSettings }) {
-  // 当前正在编辑的 profile ID
+function SettingsPage({ settings, setSettings ,questions, setQuestions}) {
   const [activeId, setActiveId] = useState(settings.profiles[0].id);
-  
   const activeProfile = settings.profiles.find(p => p.id === activeId) || settings.profiles[0];
   
-  // 编辑表单状态
   const [formName, setFormName] = useState(activeProfile.name);
   const [formIntervals, setFormIntervals] = useState(activeProfile.intervals.join(','));
   const [formStep, setFormStep] = useState(activeProfile.regressStep);
 
-  // 当切换左侧列表时，更新表单数据
   useEffect(() => {
     setFormName(activeProfile.name);
     setFormIntervals(activeProfile.intervals.join(','));
     setFormStep(activeProfile.regressStep);
   }, [activeProfile]);
 
-  // 新增规则
   const handleAddProfile = () => {
     const newId = `custom_${Date.now()}`;
     const newProfile = {
@@ -468,19 +463,17 @@ function SettingsPage({ settings, setSettings }) {
       intervals: [1, 3, 7],
       regressStep: 1
     };
-    setSettings({
-      ...settings,
-      profiles: [...settings.profiles, newProfile]
-    });
-    setActiveId(newId); // 自动选中新建的
+    setSettings({ ...settings, profiles: [...settings.profiles, newProfile] });
+    setActiveId(newId);
   };
 
-  // 保存当前修改
   const handleSave = () => {
+    // 1. 解析新规则的间隔数组
     const newIntervals = formIntervals.split(',')
       .map(s => parseInt(s.trim()))
-      .filter(n => !isNaN(n)); // 允许 0
+      .filter(n => !isNaN(n));
 
+    // 2. 准备更新 Settings
     const updatedProfiles = settings.profiles.map(p => {
       if (p.id === activeId) {
         return {
@@ -493,24 +486,62 @@ function SettingsPage({ settings, setSettings }) {
       return p;
     });
 
+    // 3. 准备更新 Questions (批量修正日期)
+    const today = dayjs().format('YYYY-MM-DD');
+    const oldIntervals = activeProfile.intervals; // 保存前的旧间隔
+
+    const updatedQuestions = questions.map(q => {
+      // 条件A: 必须是属于当前正在修改的规则
+      if (q.settingId !== activeId) return q;
+
+      // 条件B: 必须是“将来”或“今天”的任务。
+      // 如果已经是过去的逾期任务，根据你的要求，不应该改动历史。
+      if (q.nextReviewDate < today) return q;
+
+      // --- 开始计算时差 ---
+      
+      // 1. 获取该题目当前Streak对应的“旧间隔天数”
+      // (注意防止数组越界，取最后一位)
+      const oldIndex = Math.min(q.streak, oldIntervals.length - 1);
+      const oldDays = oldIntervals[oldIndex] !== undefined ? oldIntervals[oldIndex] : 1;
+
+      // 2. 获取该题目当前Streak对应的“新间隔天数”
+      const newIndex = Math.min(q.streak, newIntervals.length - 1);
+      const newDays = newIntervals[newIndex] !== undefined ? newIntervals[newIndex] : 1;
+
+      // 3. 算出差值 (比如 0变1，差值就是 +1)
+      const diff = newDays - oldDays;
+
+      // 4. 如果没变化，直接返回
+      if (diff === 0) return q;
+
+      // 5. 应用时差：在原定日期上 加/减 差值
+      const fixedDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
+
+      console.log(`修正题目: ${q.content}, 原日期: ${q.nextReviewDate}, 新日期: ${fixedDate} (差值 ${diff})`);
+
+      return {
+        ...q,
+        nextReviewDate: fixedDate
+      };
+    });
+
+    // 4. 同时提交修改
     setSettings({ ...settings, profiles: updatedProfiles });
-    alert("✅ 规则已保存");
+    setQuestions(updatedQuestions);
+    
+    alert(`✅ 规则已保存，并智能修正了 ${updatedQuestions.filter((q,i) => q.nextReviewDate !== questions[i].nextReviewDate).length} 个待办任务的日期。`);
   };
 
-  // 设为默认
-  const handleSetDefault = () => {
-    setSettings({ ...settings, defaultId: activeId });
-  };
+  const handleSetDefault = () => { setSettings({ ...settings, defaultId: activeId }); };
 
-  // 删除规则
   const handleDelete = () => {
     if (settings.profiles.length <= 1) return alert("至少保留一个规则！");
-    if (activeId === settings.defaultId) return alert("无法删除默认规则，请先将其他规则设为默认。");
-    
-    if (window.confirm("确定删除吗？使用此规则的错题将可能会找不到对应配置（建议仅供测试使用）")) {
+    if (activeId === settings.defaultId) return alert("无法删除默认规则。");
+    if (window.confirm("确定删除吗？")) {
       const newProfiles = settings.profiles.filter(p => p.id !== activeId);
       setSettings({ ...settings, profiles: newProfiles });
-      setActiveId(newProfiles[0].id); // 选中第一个
+      setActiveId(newProfiles[0].id);
     }
   };
 
@@ -546,18 +577,18 @@ function SettingsPage({ settings, setSettings }) {
             </div>
 
             <div style={{marginBottom: '15px'}}>
-              <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>间隔序列 (允许填0，代表当天)</label>
+              <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>间隔序列 (允许填0)</label>
               <input type="text" value={formIntervals} onChange={e => setFormIntervals(e.target.value)} />
-              <p style={{fontSize:'0.8rem', color:'#888', margin:'5px 0'}}>
-                例如: 0, 1, 3, 7<br/>
-                第1次(0): 立即复习; 第2次(1): 隔1天...
-              </p>
             </div>
 
             <div style={{marginBottom: '20px'}}>
-              <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>做错倒退级数: {formStep}</label>
+              <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>
+                {/* ★ 逻辑修复：显示0级 */}
+                做错倒退级数: {formStep === 0 ? '0 (不倒退)' : `${formStep} 级`}
+              </label>
               <input 
-                type="range" min="1" max="5" 
+                type="range" 
+                min="0" max="5" /* ★ 逻辑修复：允许设为 0 */
                 value={formStep} 
                 onChange={e => setFormStep(parseInt(e.target.value))} 
                 style={{width: '100%'}}
