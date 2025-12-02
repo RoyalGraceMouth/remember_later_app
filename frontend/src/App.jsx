@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect,useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
 import './App.css'; 
@@ -77,36 +77,45 @@ function App() {
         return { ...q, content: newContent, settingId: newSettingId };
       }
 
-      // 计算新规则下的毕业状态
+      // 1. 预判新的毕业状态
       const isNowGraduated = q.streak >= newProfile.intervals.length;
 
-      // --- 核心修复：全逻辑通用时差计算 ---
-      // 无论是否毕业，无论是否复活，我们都计算规则的时间差，应用到原日期上。
+      // --- ★★★ 核心修复：状态感知的取值逻辑 ★★★ ---
       
-      // 1. 获取旧间隔
-      const oldIndex = Math.min(q.streak, oldProfile.intervals.length - 1);
-      const oldDays = oldProfile.intervals[oldIndex] !== undefined ? oldProfile.intervals[oldIndex] : 1;
+      // 辅助函数：根据状态，决定取“学习间隔”还是“维保间隔”
+      const getEffectiveInterval = (profile, streak, isGradState) => {
+        if (isGradState) {
+          // 如果是毕业状态，取维保间隔
+          return parseInt(profile.graduationInterval || 0);
+        } else {
+          // 如果是学习状态，取学习序列间隔
+          const index = Math.min(streak, profile.intervals.length - 1);
+          return profile.intervals[index] !== undefined ? profile.intervals[index] : 1;
+        }
+      };
 
-      // 2. 获取新间隔
-      const newIndex = Math.min(q.streak, newProfile.intervals.length - 1);
-      const newDays = newProfile.intervals[newIndex] !== undefined ? newProfile.intervals[newIndex] : 1;
+      // 2. 取旧值 (基于该题原本的状态 q.isGraduated)
+      const valOld = getEffectiveInterval(oldProfile, q.streak, q.isGraduated);
 
-      // 3. 算出差值 (例如: 旧9天，新10天，差+1天)
-      const diff = newDays - oldDays;
+      // 3. 取新值 (基于该题未来的状态 isNowGraduated)
+      const valNew = getEffectiveInterval(newProfile, q.streak, isNowGraduated);
 
-      // 4. 计算新日期
-      // 注意：兼容旧数据。如果以前存的是字符串"已毕业"，那只能重置为今天（没办法，旧数据丢失了锚点）。
+      // 4. 计算真正的差值
+      const diff = valNew - valOld;
+
+      console.log(`规则变更: ${valOld}天 -> ${valNew}天 (Diff: ${diff})`);
+
+      // 5. 应用日期修正
       let newDate = q.nextReviewDate;
       
+      // 兼容旧数据
       if (q.nextReviewDate === '🏁 已毕业') {
-        // 只有旧数据才会走到这里
-        newDate = dayjs().format('YYYY-MM-DD'); 
-      } else {
-        // 新逻辑：在原有日期基础上 平移
+        if (!isNowGraduated || newProfile.graduationInterval > 0) {
+           newDate = dayjs().format('YYYY-MM-DD');
+        }
+      } else if (diff !== 0) {
         newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
       }
-
-      console.log(`规则变更修正: ${diff > 0 ? '+' : ''}${diff}天, 新日期: ${newDate}`);
 
       return {
         ...q,
@@ -868,18 +877,14 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
     // 1. 校验间隔序列
     const rawIntervals = formIntervals.split(/[,，\s]+/);
     const newIntervals = [];
-
     for (let s of rawIntervals) {
       if (!s.trim()) continue;
       const num = Number(s);
-      if (isNaN(num) || num < 0) {
-        return alert(`❌ 间隔输入错误："${s}" 不是有效的正整数或0`);
-      }
+      if (isNaN(num) || num < 0) return alert(`❌ 间隔输入错误："${s}" 无效`);
       newIntervals.push(num);
     }
-
-    if (newIntervals.length === 0) return alert("❌ 至少需要设置一个间隔时间！");
-
+    if (newIntervals.length === 0) return alert("❌ 至少需要设置一个间隔");
+    
     // 2. 校验毕业间隔
     const gradInt = parseInt(formGradInterval);
     if (isNaN(gradInt) || gradInt < 0) return alert("❌ 毕业检查间隔无效");
@@ -892,39 +897,49 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
           name: formName,
           intervals: newIntervals,
           regressStep: formStep,
-          graduationInterval: gradInt // 保存维保间隔
+          graduationInterval: gradInt
         };
       }
       return p;
     });
 
-    // 4. 批量更新 Questions (日期平移逻辑)
-    const oldIntervals = activeProfile.intervals;
+    // 4. 更新 Questions (应用状态感知逻辑)
+    // 构造一个临时的 oldProfile 对象，方便复用上面的逻辑函数
+    const oldProfile = activeProfile;
+    // 构造一个临时的 newProfile 对象
+    const newProfile = { 
+        intervals: newIntervals, 
+        graduationInterval: gradInt 
+    };
+
     const updatedQuestions = questions.map(q => {
       if (q.settingId !== activeId) return q;
 
       const isNowGraduated = q.streak >= newIntervals.length;
 
-      const oldIndex = Math.min(q.streak, oldIntervals.length - 1);
-      const oldDays = oldIntervals[oldIndex] !== undefined ? oldIntervals[oldIndex] : 1;
+      // --- 逻辑复用 ---
+      const getEffectiveInterval = (profile, streak, isGradState) => {
+        if (isGradState) {
+          return parseInt(profile.graduationInterval || 0);
+        } else {
+          const index = Math.min(streak, profile.intervals.length - 1);
+          return profile.intervals[index] !== undefined ? profile.intervals[index] : 1;
+        }
+      };
 
-      const newIndex = Math.min(q.streak, newIntervals.length - 1);
-      const newDays = newIntervals[newIndex] !== undefined ? newIntervals[newIndex] : 1;
+      const valOld = getEffectiveInterval(oldProfile, q.streak, q.isGraduated);
+      const valNew = getEffectiveInterval(newProfile, q.streak, isNowGraduated);
 
-      const diff = newDays - oldDays;
+      const diff = valNew - valOld;
+
       let newDate = q.nextReviewDate;
-
       if (q.nextReviewDate === '🏁 已毕业') {
-         if (!isNowGraduated) newDate = dayjs().format('YYYY-MM-DD');
+         if (!isNowGraduated || gradInt > 0) newDate = dayjs().format('YYYY-MM-DD');
       } else if (diff !== 0) {
          newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
       }
 
-      return {
-        ...q,
-        nextReviewDate: newDate,
-        isGraduated: isNowGraduated
-      };
+      return { ...q, nextReviewDate: newDate, isGraduated: isNowGraduated };
     });
 
     setSettings({ ...settings, profiles: updatedProfiles });
@@ -1029,20 +1044,65 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
 // 作用：根据题目当前的 streak 和 settings，算出未来所有的复习日期点
 const calculateTimeline = (question, profile) => {
   const dates = new Set();
-  let currentDateObj = dayjs(question.nextReviewDate);
-  dates.add(currentDateObj.format('YYYY-MM-DD'));
-
-  let tempStreak = question.streak;
   
-  // 安全限制：最多预测20次，防止死循环
-  for(let i=0; i<20; i++) {
-    tempStreak++;
-    if (tempStreak >= profile.intervals.length) break;
+  // 1. 安全检查：如果没有日期或规则，直接返回
+  if (!question.nextReviewDate || !profile) return dates;
+  if (question.nextReviewDate === '🏁 已毕业') return dates; // 兼容旧数据
 
-    const daysToAdd = profile.intervals[tempStreak];
+  let currentDateObj = dayjs(question.nextReviewDate);
+  dates.add(currentDateObj.format('YYYY-MM-DD')); // 加入当前这一个确定的点
+
+  // 获取规则参数
+  const intervals = profile.intervals;
+  const gradInterval = parseInt(profile.graduationInterval || 0);
+  
+  // 模拟状态
+  let tempStreak = question.streak;
+  let isGraduated = question.isGraduated; // 初始状态可能已经是毕业
+
+  // 设定“视距”：为了性能，只预测未来 2年 或 50次复习
+  const LIMIT_DATE = dayjs().add(2, 'year');
+  const MAX_STEPS = 50;
+
+  for (let i = 0; i < MAX_STEPS; i++) {
+    // 如果日期已经超出了2年，停止计算（没人会翻到2年后去复习日历）
+    if (currentDateObj.isAfter(LIMIT_DATE)) break;
+
+    let daysToAdd = 0;
+
+    // --- 分支逻辑 ---
+    
+    if (isGraduated) {
+      // 状态 A: 已经在毕业维保期
+      if (gradInterval > 0) {
+        daysToAdd = gradInterval; // 无限循环这个间隔
+      } else {
+        break; // 没开启维保，预测结束
+      }
+    } else {
+      // 状态 B: 还在升级路上
+      tempStreak++;
+      
+      // 检查这次升级后是否毕业
+      if (tempStreak >= intervals.length) {
+        isGraduated = true; // 标记为毕业，下次循环进入状态 A
+        
+        if (gradInterval > 0) {
+          daysToAdd = gradInterval; // 毕业后的第一顿维保
+        } else {
+          break; // 毕业即死
+        }
+      } else {
+        // 还没毕业，查表取间隔
+        daysToAdd = intervals[tempStreak];
+      }
+    }
+
+    // 计算下一个日期
     currentDateObj = currentDateObj.add(daysToAdd, 'day');
     dates.add(currentDateObj.format('YYYY-MM-DD'));
   }
+
   return dates;
 };
 
@@ -1051,17 +1111,22 @@ function Calendar({ questions, selectedDate, onDateSelect, getProfileById }) {
   const [currentDate, setCurrentDate] = useState(dayjs(selectedDate));
 
   // 预测算法：现在必须对每道题分别查找它的规则
-  const taskMap = (() => {
+  const taskMap = useMemo(() => {
+    // console.time("CalendarCalc"); // 调试性能用
     const map = new Set();
+    
     questions.forEach(q => {
-      const profile = getProfileById(q.settingId); // ★ 找对应的规则
-      if(profile) {
+      const profile = getProfileById ? getProfileById(q.settingId) : null;
+      if (profile) {
+        // 这里调用刚才升级过的算法
         const timeline = calculateTimeline(q, profile);
         timeline.forEach(date => map.add(date));
       }
     });
+    
+    // console.timeEnd("CalendarCalc");
     return map;
-  })();
+  }, [questions, getProfileById]); // 依赖项
 
   const nextMonth = () => setCurrentDate(currentDate.add(1, 'month'));
   const prevMonth = () => setCurrentDate(currentDate.subtract(1, 'month'));
