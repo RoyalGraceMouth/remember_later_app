@@ -11,15 +11,17 @@ const DEFAULT_SETTINGS_DATA = {
   profiles: [
     { 
       id: 'default_1', 
-      name: '默认算法 (推荐)', 
-      intervals: [1, 2, 4, 7, 15, 30], // 经典遗忘曲线
-      regressStep: 1 
+      name: '默认算法', 
+      intervals: [1, 2, 4, 7, 15, 30], 
+      regressStep: 1,
+      graduationInterval: 0 // ★ 新增：0代表永不检查，大于0代表毕业后每隔多少天检查
     },
     { 
       id: 'hard_mode', 
       name: '魔鬼训练 (包含当日)', 
       intervals: [0, 0, 1, 3, 7], // 0代表今天立刻再做一次
-      regressStep: 2 
+      regressStep: 2 ,
+      graduationInterval: 0
     }
   ],
   // 当前默认使用的规则 ID
@@ -159,35 +161,65 @@ function App() {
       if (q.id !== id) return q;
 
       const profile = getProfileById(q.settingId);
+      // 容错处理：确保毕业间隔是数字
+      const gradInterval = parseInt(profile.graduationInterval || 0);
       
+      // --- 第一步：计算新的等级 (Streak) ---
       let newStreak = q.streak;
+      
       if (isCorrect) {
+        // 做对：等级 +1
+        // (注意：即使已经毕业了，等级也可以继续无限加，代表熟练度堆积)
         newStreak = newStreak + 1;
       } else {
+        // 做错：等级倒退 (最低为0)
+        // 逻辑：不管是“刚学”还是“毕业抽查”，做错了一律按规则降级
         newStreak = Math.max(0, newStreak - profile.regressStep);
       }
 
-      // 判断是否毕业
-      const isGraduated = newStreak >= profile.intervals.length;
+      // --- 第二步：计算新的毕业状态 ---
+      // 只要等级超过了规则长度，就是毕业状态
+      // (这就自动处理了“毕业抽查做错降级后，自动失去毕业身份”的逻辑)
+      const isNowGraduated = newStreak >= profile.intervals.length;
 
-      // ★★★ 核心修改：无论是否毕业，都要计算一个合法的日期 ★★★
-      // 哪怕毕业了，我们也算一个“理论日期”，作为锚点。
-      // 如果毕业了，我们依然用最后一个间隔（或者当前等级对应的间隔）来往后推。
+      // --- 第三步：计算下一次复习日期 ---
+      let nextDate = '';
       
-      // 防止数组越界取值
-      const intervalIndex = Math.min(newStreak, profile.intervals.length - 1);
-      const daysToAdd = profile.intervals[intervalIndex];
-      const nextDate = dayjs().add(daysToAdd, 'day').format('YYYY-MM-DD');
+      // 情况 A: 依然是毕业状态 (说明这次做对了，或者降级后依然够格)
+      if (isNowGraduated) {
+        if (gradInterval > 0) {
+          // 开启了维保：安排在 N 天后抽查
+          // ★ 关键：这里必须基于【今天】往后推，而不是基于原计划日期
+          nextDate = dayjs().add(gradInterval, 'day').format('YYYY-MM-DD');
+        } else {
+          // 没开启维保：彻底退休
+          nextDate = '🏁 已毕业';
+        }
+      }
+      
+      // 情况 B: 未毕业 / 失去毕业资格 / 还在学习中
+      else {
+        // 查表获取间隔
+        // 注意：如果 newStreak 是 0，就取 intervals[0]
+        const intervalIndex = Math.min(newStreak, profile.intervals.length - 1);
+        
+        // ★ 关键修复：确保取出的间隔是有效数字，如果是 undefined 或 null，默认为 1
+        const daysToAdd = profile.intervals[intervalIndex] !== undefined ? profile.intervals[intervalIndex] : 1;
+        
+        // 计算日期：基于【今天】往后推
+        nextDate = dayjs().add(daysToAdd, 'day').format('YYYY-MM-DD');
+      }
 
+      // --- 第四步：返回新对象 ---
+      // (React 会对比新旧对象，只要 nextDate 变了，或者 streak 变了，就会刷新 UI)
       return {
         ...q,
         streak: newStreak,
-        nextReviewDate: nextDate, // ★ 永远存真实日期，不再存字符串
-        isGraduated: isGraduated  // ★ 只靠这个标记来决定显不显示
+        nextReviewDate: nextDate,
+        isGraduated: isNowGraduated
       };
     }));
   };
-
   // 登录退出
   const login = (name) => setUser({ name, avatar: '👤' });
   const logout = () => setUser(null);
@@ -267,9 +299,23 @@ function HomePage({ questions, onAdd, onReview, onDelete, onUpdate, settings, ge
 
   const reviewsDue = questions.filter(q => {
     const profile = getProfileById(q.settingId);
-    if (selectedDate === today) return q.nextReviewDate <= today;
-    const timeline = calculateTimeline(q, profile);
-    return timeline.has(selectedDate);
+    
+    // --- 筛选逻辑修改 ---
+    // 1. 如果是“永久毕业”状态 (日期字符串是🏁)，永远不显示
+    if (q.nextReviewDate === '🏁 已毕业') return false;
+
+    // 2. 如果是普通毕业 (有具体日期)，且日期到了，必须显示！
+    // 3. 如果是未毕业，且日期到了，必须显示！
+    
+    // 简单来说，只要日期有效，且符合 selectedDate，就显示。
+    // 不再单纯依据 isGraduated 暴力过滤。
+    
+    if (selectedDate === today) {
+      return q.nextReviewDate <= today;
+    } else {
+      const timeline = calculateTimeline(q, profile);
+      return timeline.has(selectedDate);
+    }
   });
 
   const handleSubmit = (e) => {
@@ -390,22 +436,32 @@ function ReviewCard({
   onReview, 
   onEdit, 
   onDelete, 
-  getProfileById, // 必须传这个，用于判断是否毕业
-  readOnly = false // 新增：是否为只读模式（用于数据库页面）
+  getProfileById, 
+  readOnly = false 
 }) {
   const [showMenu, setShowMenu] = useState(false);
   
-  // 1. 获取该题目的规则
-  const profile = getProfileById(question.settingId);
-  const profileName = profile?.name || '未知规则';
+  // 1. 获取规则信息
+  // 安全获取，防止 getProfileById 未传或规则被删导致报错
+  const profile = getProfileById ? getProfileById(question.settingId) : null;
+  const profileName = profile?.name || '默认规则';
   
-  // 2. ★★★ 核心逻辑：判断下一次点击是否毕业 ★★★
-  // 如果当前等级 + 1 >= 规则的总长度，说明点一下就通关了
-  const isNextGraduation = profile && (question.streak + 1 >= profile.intervals.length);
+  // 2. 毕业预判逻辑
+  // 判断：如果再做对一次，等级是否达到或超过规则长度？
+  const isNextGraduation = profile && profile.intervals && (question.streak + 1 >= profile.intervals.length);
+
+  // 3. 动态样式处理
+  // 如果是“已毕业”状态（无论是维保抽查，还是在数据库查看），给点特殊样式
+  const cardClass = `review-item ${question.isGraduated ? 'graduated-style' : ''}`;
+  
+  const cardStyle = question.isGraduated 
+    ? { background: '#faf5ff', borderColor: '#e9d5ff' } // 淡淡的紫色背景
+    : {};
 
   return (
-    <div className="review-item" onMouseLeave={() => setShowMenu(false)}>
-      {/* 菜单逻辑不变 */}
+    <div className={cardClass} style={cardStyle} onMouseLeave={() => setShowMenu(false)}>
+      
+      {/* --- A. 右上角更多菜单 --- */}
       <button className="more-btn" onClick={() => setShowMenu(!showMenu)}>
         <MoreHorizontal size={20} />
       </button>
@@ -413,76 +469,86 @@ function ReviewCard({
       {showMenu && (
         <div className="menu-dropdown">
           <div className="menu-item" onClick={() => { onEdit(); setShowMenu(false); }}>
-            <Edit2 size={16} /> 编辑
+            <Edit2 size={16} /> 编辑 / 改规则
           </div>
-          <div className="menu-item delete" onClick={() => { onDelete(); setShowMenu(false); }}>
-            <Trash2 size={16} /> 删除
+          <div className="menu-item delete" onClick={() => { 
+             if(window.confirm('确定要彻底删除这个错题档案吗？此操作无法撤销。')) {
+               onDelete(); // 调用父级绑定的删除
+             }
+             setShowMenu(false); 
+          }}>
+            <Trash2 size={16} /> 彻底删除
           </div>
         </div>
       )}
 
-      {/* 题目内容 */}
+      {/* --- B. 题目内容 --- */}
       <div className="review-content" style={{whiteSpace: 'pre-wrap'}}>
         {question.content}
       </div>
 
-    <div className="review-footer">
-      <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+      {/* --- C. 底部信息栏 --- */}
+      <div className="review-footer">
         
-        {/* 状态标签 */}
-        {question.isGraduated ? (
-          <span className="mini-tag" style={{background:'#f3e8ff', color:'#702963', fontWeight:'bold', display:'flex', alignItems:'center', gap:'4px'}}>
-            <GraduationCap size={14}/> 已毕业
-          </span>
-        ) : (
-          <span className="mini-tag">Lv.{question.streak}</span>
-        )}
-        
-        <span className="mini-tag">{profileName}</span>
-        
-        {/* ★ 逻辑调整：只有非毕业状态，才显示日期 ★ */}
-        {isFuture && !question.isGraduated && (
-          <span className="mini-tag" style={{background:'#fef3c7', color:'#d97706'}}>
-            {question.nextReviewDate}
-          </span>
-        )}
-      </div>
+        {/* 左侧：标签信息 */}
+        <div style={{display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap'}}>
+          
+          {/* 状态标签：区分普通等级 和 毕业状态 */}
+          {question.isGraduated ? (
+            <span className="mini-tag" style={{background:'#f3e8ff', color:'#702963', fontWeight:'bold', display:'flex', alignItems:'center', gap:'4px'}}>
+              <GraduationCap size={14}/> 
+              {readOnly ? '已毕业' : '毕业抽查'} {/* 在数据库显示已毕业，在首页显示抽查 */}
+            </span>
+          ) : (
+            <span className="mini-tag">Lv.{question.streak}</span>
+          )}
+          
+          {/* 规则名称 */}
+          <span className="mini-tag">{profileName}</span>
+          
+          {/* 未来预测时间 (仅在非毕业且是未来视图时显示) */}
+          {isFuture && !question.isGraduated && (
+            <span className="mini-tag" style={{background:'#fef3c7', color:'#d97706'}}>
+              {question.nextReviewDate}
+            </span>
+          )}
+        </div>
 
-        {/* 按钮区域逻辑 */}
-        {!readOnly && !isFuture && !question.isGraduated && (
+        {/* 右侧：操作按钮组 */}
+        {/* 显示条件：非只读模式 AND 非未来视图 */}
+        {/* 注意：即使是 isGraduated，只要出现在这里(说明是抽查日)，也需要显示按钮 */}
+        {!readOnly && !isFuture && (
           <div className="action-row">
-            {/* 忘了按钮 */}
-            <button 
-              className="icon-btn btn-forgot" 
-              onClick={() => onReview(question.id, false)}
-              title="忘了 (退步)"
-            >
-              <X size={24} strokeWidth={3} />
-            </button>
+             
+             {/* 1. 忘了 (X) */}
+             <button 
+                className="icon-btn btn-forgot" 
+                onClick={() => onReview(question.id, false)}
+                title="忘了 (退步)"
+             >
+                <X size={24} strokeWidth={3} />
+             </button>
 
-            {/* 记得按钮 vs 毕业按钮 */}
-            {isNextGraduation ? (
-              <button 
-                className="icon-btn btn-graduate" 
-                onClick={() => {
-                  // 这里可以加个礼花特效 alert，增加情绪价值
-                  // alert("🎉 恭喜！这道题通过了所有考验，光荣毕业！"); 
-                  onReview(question.id, true);
-                }}
-                title="点击毕业！(Byzantine Purple)"
-              >
-                {/* 🎓 毕业帽图标 */}
-                <GraduationCap size={24} strokeWidth={3} />
-              </button>
-            ) : (
-              <button 
-                className="icon-btn btn-remember" 
-                onClick={() => onReview(question.id, true)}
-                title="记得 (保持)"
-              >
-                <Check size={24} strokeWidth={3} />
-              </button>
-            )}
+             {/* 2. 记得 (Check) 或 毕业 (Cap) */}
+             {/* 如果即将毕业(且当前还没毕业)，显示紫色帽子 */}
+             {!question.isGraduated && isNextGraduation ? (
+                <button 
+                  className="icon-btn btn-graduate" 
+                  onClick={() => onReview(question.id, true)}
+                  title="点击毕业！(Byzantine Purple)"
+                >
+                  <GraduationCap size={24} strokeWidth={3} />
+                </button>
+             ) : (
+                // 否则(普通升级 或 毕业生保级)，显示绿色对勾
+                <button 
+                  className="icon-btn btn-remember" 
+                  onClick={() => onReview(question.id, true)}
+                  title="记得 (保持)"
+                >
+                  <Check size={24} strokeWidth={3} />
+                </button>
+             )}
           </div>
         )}
       </div>
@@ -763,18 +829,26 @@ function ProfilePage({ user, questions, onLogout }) {
 }
 
 // 7. 设置页
-function SettingsPage({ settings, setSettings ,questions, setQuestions}) {
+// src/App.jsx -> SettingsPage 组件 (完整版)
+
+function SettingsPage({ settings, setSettings, questions, setQuestions }) {
   const [activeId, setActiveId] = useState(settings.profiles[0].id);
   const activeProfile = settings.profiles.find(p => p.id === activeId) || settings.profiles[0];
   
+  // 表单状态
   const [formName, setFormName] = useState(activeProfile.name);
   const [formIntervals, setFormIntervals] = useState(activeProfile.intervals.join(','));
   const [formStep, setFormStep] = useState(activeProfile.regressStep);
+  // ★ 新增：维保间隔状态
+  const [formGradInterval, setFormGradInterval] = useState(activeProfile.graduationInterval || 0);
 
+  // 切换规则时，同步表单数据
   useEffect(() => {
     setFormName(activeProfile.name);
     setFormIntervals(activeProfile.intervals.join(','));
     setFormStep(activeProfile.regressStep);
+    // ★ 同步维保间隔
+    setFormGradInterval(activeProfile.graduationInterval || 0);
   }, [activeProfile]);
 
   const handleAddProfile = () => {
@@ -783,93 +857,83 @@ function SettingsPage({ settings, setSettings ,questions, setQuestions}) {
       id: newId,
       name: "新规则",
       intervals: [1, 3, 7],
-      regressStep: 1
+      regressStep: 1,
+      graduationInterval: 0
     };
     setSettings({ ...settings, profiles: [...settings.profiles, newProfile] });
     setActiveId(newId);
   };
 
   const handleSave = () => {
-    // 1. 解析新规则的间隔数组
-    const newIntervals = formIntervals.split(/[,，\s]+/).map(s => {
-      const n = parseInt(s.trim());
-      return isNaN(n) ? null : n;
-    }).filter(n => n !== null); // 简单的过滤
+    // 1. 校验间隔序列
+    const rawIntervals = formIntervals.split(/[,，\s]+/);
+    const newIntervals = [];
 
-    if (newIntervals.length === 0) return alert("❌ 至少需要设置一个间隔");
-    // 这里建议加上之前写的那些合法性校验 (负数校验等)，为了节省篇幅这里略过，保留你之前的校验代码即可
+    for (let s of rawIntervals) {
+      if (!s.trim()) continue;
+      const num = Number(s);
+      if (isNaN(num) || num < 0) {
+        return alert(`❌ 间隔输入错误："${s}" 不是有效的正整数或0`);
+      }
+      newIntervals.push(num);
+    }
 
-    // 2. 准备更新 Settings
+    if (newIntervals.length === 0) return alert("❌ 至少需要设置一个间隔时间！");
+
+    // 2. 校验毕业间隔
+    const gradInt = parseInt(formGradInterval);
+    if (isNaN(gradInt) || gradInt < 0) return alert("❌ 毕业检查间隔无效");
+
+    // 3. 更新 Settings
     const updatedProfiles = settings.profiles.map(p => {
       if (p.id === activeId) {
         return {
           ...p,
           name: formName,
           intervals: newIntervals,
-          regressStep: formStep
+          regressStep: formStep,
+          graduationInterval: gradInt // 保存维保间隔
         };
       }
       return p;
     });
 
-    // 3. 准备更新 Questions (批量修正日期)
-    // 必须在更新 settings 之前获取旧的间隔，否则对比就失效了
-    const oldIntervals = activeProfile.intervals; 
-
+    // 4. 批量更新 Questions (日期平移逻辑)
+    const oldIntervals = activeProfile.intervals;
     const updatedQuestions = questions.map(q => {
-      // 筛选：只处理属于该规则的题
       if (q.settingId !== activeId) return q;
 
-      // --- 步骤 A: 计算新规则下的毕业状态 ---
       const isNowGraduated = q.streak >= newIntervals.length;
 
-      // --- 步骤 B: 计算时差 (Diff) ---
-      // 1. 旧间隔
       const oldIndex = Math.min(q.streak, oldIntervals.length - 1);
       const oldDays = oldIntervals[oldIndex] !== undefined ? oldIntervals[oldIndex] : 1;
 
-      // 2. 新间隔
       const newIndex = Math.min(q.streak, newIntervals.length - 1);
       const newDays = newIntervals[newIndex] !== undefined ? newIntervals[newIndex] : 1;
 
-      // 3. 差值
       const diff = newDays - oldDays;
-
-      // --- 步骤 C: 计算新日期 ---
       let newDate = q.nextReviewDate;
 
-      // 特殊情况处理：处理旧数据的兼容性
-      // 如果数据库里存的是死字符串 '🏁 已毕业'，我们无法计算偏移，只能被迫重置为今天。
-      // (但在新的逻辑下，我们都会存真实日期，所以这种情况只会发生一次)
       if (q.nextReviewDate === '🏁 已毕业') {
-        if (!isNowGraduated) {
-           newDate = dayjs().format('YYYY-MM-DD'); // 复活且无锚点，只能设为今天
-        }
-      } 
-      else {
-        // ★★★ 核心逻辑：无论毕业与否，都进行日期平移 ★★★
-        // 比如：原定 2025-12-01, diff +1 -> 2025-12-02
-        if (diff !== 0) {
-          newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
-        }
+         if (!isNowGraduated) newDate = dayjs().format('YYYY-MM-DD');
+      } else if (diff !== 0) {
+         newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
       }
 
       return {
         ...q,
-        nextReviewDate: newDate,    // 更新日期
-        isGraduated: isNowGraduated // 更新毕业状态
+        nextReviewDate: newDate,
+        isGraduated: isNowGraduated
       };
     });
 
-    // 4. 提交修改
     setSettings({ ...settings, profiles: updatedProfiles });
     setQuestions(updatedQuestions);
-    
-    alert(`✅ 规则已保存，智能修正了相关题目的复习日程。`);
+    alert("✅ 规则已更新");
   };
 
   const handleSetDefault = () => { setSettings({ ...settings, defaultId: activeId }); };
-
+  
   const handleDelete = () => {
     if (settings.profiles.length <= 1) return alert("至少保留一个规则！");
     if (activeId === settings.defaultId) return alert("无法删除默认规则。");
@@ -918,16 +982,34 @@ function SettingsPage({ settings, setSettings ,questions, setQuestions}) {
 
             <div style={{marginBottom: '20px'}}>
               <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>
-                {/* ★ 逻辑修复：显示0级 */}
                 做错倒退级数: {formStep === 0 ? '0 (不倒退)' : `${formStep} 级`}
               </label>
               <input 
-                type="range" 
-                min="0" max="5" /* ★ 逻辑修复：允许设为 0 */
+                type="range" min="0" max="5" 
                 value={formStep} 
                 onChange={e => setFormStep(parseInt(e.target.value))} 
                 style={{width: '100%'}}
               />
+            </div>
+
+            {/* ★★★ 新增的 UI 区域：毕业维保 ★★★ */}
+            <div style={{marginBottom: '25px', padding: '15px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0'}}>
+              <label style={{display:'block', marginBottom:'8px', fontWeight:'bold', fontSize:'0.9rem', color: '#4f46e5'}}>
+                🛡️ 毕业维保设置
+              </label>
+              <div style={{display:'flex', alignItems:'center', gap:'15px'}}>
+                 <input 
+                    type="number" min="0" 
+                    value={formGradInterval}
+                    onChange={e => setFormGradInterval(e.target.value)}
+                    style={{width: '100px', marginBottom:0, textAlign: 'center'}}
+                 />
+                 <span style={{fontSize:'0.85rem', color:'#666', lineHeight: '1.4'}}>
+                   {formGradInterval == 0 
+                     ? '关闭 (毕业后永久不再出现)' 
+                     : `开启 (毕业后，每隔 ${formGradInterval} 天自动抽查一次)`}
+                 </span>
+              </div>
             </div>
 
             <div style={{display: 'flex', gap: '10px'}}>
