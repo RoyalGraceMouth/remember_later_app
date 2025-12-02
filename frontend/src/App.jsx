@@ -2,7 +2,7 @@ import React, { useState, useEffect,useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import dayjs from 'dayjs';
 import './App.css'; 
-import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon , GraduationCap} from 'lucide-react';
+import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon , GraduationCap,History,Clock} from 'lucide-react';
 import {Search,Database} from 'lucide-react';
 
 // --- 默认设置 ---
@@ -80,35 +80,21 @@ function App() {
       // 1. 预判新的毕业状态
       const isNowGraduated = q.streak >= newProfile.intervals.length;
 
-      // --- ★★★ 核心修复：状态感知的取值逻辑 ★★★ ---
-      
-      // 辅助函数：根据状态，决定取“学习间隔”还是“维保间隔”
+      // --- 2. 日期修正逻辑 (保持之前的状态感知逻辑) ---
       const getEffectiveInterval = (profile, streak, isGradState) => {
         if (isGradState) {
-          // 如果是毕业状态，取维保间隔
           return parseInt(profile.graduationInterval || 0);
         } else {
-          // 如果是学习状态，取学习序列间隔
           const index = Math.min(streak, profile.intervals.length - 1);
           return profile.intervals[index] !== undefined ? profile.intervals[index] : 1;
         }
       };
 
-      // 2. 取旧值 (基于该题原本的状态 q.isGraduated)
       const valOld = getEffectiveInterval(oldProfile, q.streak, q.isGraduated);
-
-      // 3. 取新值 (基于该题未来的状态 isNowGraduated)
       const valNew = getEffectiveInterval(newProfile, q.streak, isNowGraduated);
-
-      // 4. 计算真正的差值
       const diff = valNew - valOld;
 
-      console.log(`规则变更: ${valOld}天 -> ${valNew}天 (Diff: ${diff})`);
-
-      // 5. 应用日期修正
       let newDate = q.nextReviewDate;
-      
-      // 兼容旧数据
       if (q.nextReviewDate === '🏁 已毕业') {
         if (!isNowGraduated || newProfile.graduationInterval > 0) {
            newDate = dayjs().format('YYYY-MM-DD');
@@ -117,12 +103,28 @@ function App() {
         newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
       }
 
+      // --- ★★★ 新增：历史记录修正 (History Rewrite) ★★★ ---
+      let newHistory = q.history || [];
+
+      // 如果发生了“复活” (从毕业 -> 未毕业)
+      // 意味着以前所谓的“毕业”操作，现在看来只是普通的“做对”
+      if (q.isGraduated && !isNowGraduated) {
+        newHistory = newHistory.map(record => {
+          if (record.result === 'graduated') {
+            return { ...record, result: 'correct' }; // 紫色变绿色
+          }
+          return record;
+        });
+        console.log(`题目[${id}] 历史记录修正: 撤销毕业标记`);
+      }
+
       return {
         ...q,
         content: newContent,
         settingId: newSettingId,
         nextReviewDate: newDate,
-        isGraduated: isNowGraduated
+        isGraduated: isNowGraduated,
+        history: newHistory // 更新历史
       };
     }));
   };
@@ -170,65 +172,55 @@ function App() {
       if (q.id !== id) return q;
 
       const profile = getProfileById(q.settingId);
-      // 容错处理：确保毕业间隔是数字
       const gradInterval = parseInt(profile.graduationInterval || 0);
       
-      // --- 第一步：计算新的等级 (Streak) ---
+      // --- 1. 计算核心属性 (保持之前的逻辑) ---
       let newStreak = q.streak;
-      
-      if (isCorrect) {
-        // 做对：等级 +1
-        // (注意：即使已经毕业了，等级也可以继续无限加，代表熟练度堆积)
-        newStreak = newStreak + 1;
-      } else {
-        // 做错：等级倒退 (最低为0)
-        // 逻辑：不管是“刚学”还是“毕业抽查”，做错了一律按规则降级
-        newStreak = Math.max(0, newStreak - profile.regressStep);
-      }
+      if (isCorrect) newStreak++;
+      else newStreak = Math.max(0, newStreak - profile.regressStep);
 
-      // --- 第二步：计算新的毕业状态 ---
-      // 只要等级超过了规则长度，就是毕业状态
-      // (这就自动处理了“毕业抽查做错降级后，自动失去毕业身份”的逻辑)
       const isNowGraduated = newStreak >= profile.intervals.length;
 
-      // --- 第三步：计算下一次复习日期 ---
+      // --- 2. 计算下一次日期 (保持之前的逻辑) ---
       let nextDate = '';
-      
-      // 情况 A: 依然是毕业状态 (说明这次做对了，或者降级后依然够格)
       if (isNowGraduated) {
-        if (gradInterval > 0) {
-          // 开启了维保：安排在 N 天后抽查
-          // ★ 关键：这里必须基于【今天】往后推，而不是基于原计划日期
-          nextDate = dayjs().add(gradInterval, 'day').format('YYYY-MM-DD');
-        } else {
-          // 没开启维保：彻底退休
-          nextDate = '🏁 已毕业';
-        }
-      }
-      
-      // 情况 B: 未毕业 / 失去毕业资格 / 还在学习中
-      else {
-        // 查表获取间隔
-        // 注意：如果 newStreak 是 0，就取 intervals[0]
+        if (gradInterval > 0) nextDate = dayjs().add(gradInterval, 'day').format('YYYY-MM-DD');
+        else nextDate = '🏁 已毕业';
+      } else {
         const intervalIndex = Math.min(newStreak, profile.intervals.length - 1);
-        
-        // ★ 关键修复：确保取出的间隔是有效数字，如果是 undefined 或 null，默认为 1
         const daysToAdd = profile.intervals[intervalIndex] !== undefined ? profile.intervals[intervalIndex] : 1;
-        
-        // 计算日期：基于【今天】往后推
         nextDate = dayjs().add(daysToAdd, 'day').format('YYYY-MM-DD');
       }
 
-      // --- 第四步：返回新对象 ---
-      // (React 会对比新旧对象，只要 nextDate 变了，或者 streak 变了，就会刷新 UI)
+      // --- 3. ★★★ 新增：记录历史轨迹 ★★★ ---
+      const todayStr = dayjs().format('YYYY-MM-DD');
+      
+      // 判定本次操作的结果类型
+      let resultType = 'correct'; // 默认绿色
+      if (!isCorrect) resultType = 'wrong'; // 红色
+      else if (isNowGraduated) resultType = 'graduated'; // 紫色 (毕业或维保成功)
+
+      // 构造历史记录对象
+      const newRecord = {
+        date: todayStr,
+        result: resultType,
+        streakAfter: newStreak // 可选：记录当时的等级
+      };
+
+      // 确保 history 存在
+      const currentHistory = q.history || [];
+
       return {
         ...q,
         streak: newStreak,
         nextReviewDate: nextDate,
-        isGraduated: isNowGraduated
+        isGraduated: isNowGraduated,
+        // 追加历史记录
+        history: [...currentHistory, newRecord]
       };
     }));
   };
+
   // 登录退出
   const login = (name) => setUser({ name, avatar: '👤' });
   const logout = () => setUser(null);
@@ -449,41 +441,60 @@ function ReviewCard({
   readOnly = false 
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [showHistory, setShowHistory] = useState(false); // ★ 控制折叠
   
-  // 1. 获取规则信息
-  // 安全获取，防止 getProfileById 未传或规则被删导致报错
   const profile = getProfileById ? getProfileById(question.settingId) : null;
   const profileName = profile?.name || '默认规则';
   
-  // 2. 毕业预判逻辑
-  // 判断：如果再做对一次，等级是否达到或超过规则长度？
+  // 毕业预判
   const isNextGraduation = profile && profile.intervals && (question.streak + 1 >= profile.intervals.length);
 
-  // 3. 动态样式处理
-  // 如果是“已毕业”状态（无论是维保抽查，还是在数据库查看），给点特殊样式
+  // 样式处理
   const cardClass = `review-item ${question.isGraduated ? 'graduated-style' : ''}`;
-  
   const cardStyle = question.isGraduated 
-    ? { background: '#faf5ff', borderColor: '#e9d5ff' } // 淡淡的紫色背景
+    ? { background: '#faf5ff', borderColor: '#e9d5ff' } 
     : {};
+
+  // --- ★ 计算历史 Tag 数据 ★ ---
+  const history = question.history || [];
+  
+  // 确定“初次学习日期”
+  // 如果有历史记录，取第一条的日期；如果没有，取创建时间(id)；如果都没有，取今天
+  const firstDate = history.length > 0 
+    ? dayjs(history[0].date) 
+    : dayjs(question.id); // 假设 ID 是时间戳
+
+  const renderHistoryTags = () => {
+    return history.map((record, index) => {
+      // 计算 D?：当前记录日期 - 初次日期
+      const diffDays = dayjs(record.date).diff(firstDate, 'day');
+      // 防止显示负数 (极少数情况)
+      const displayDay = diffDays >= 0 ? diffDays : 0;
+      
+      return (
+        <span key={index} className={`history-tag ${record.result}`} title={`${record.date} (${record.result})`}>
+          D{displayDay}
+        </span>
+      );
+    });
+  };
 
   return (
     <div className={cardClass} style={cardStyle} onMouseLeave={() => setShowMenu(false)}>
       
-      {/* --- A. 右上角更多菜单 --- */}
+      {/* 菜单按钮 */}
       <button className="more-btn" onClick={() => setShowMenu(!showMenu)}>
         <MoreHorizontal size={20} />
       </button>
 
+      {/* 菜单下拉 */}
       {showMenu && (
         <div className="menu-dropdown">
           <div className="menu-item" onClick={() => { onEdit(); setShowMenu(false); }}>
             <Edit2 size={16} /> 编辑 / 改规则
           </div>
           <div className="menu-item delete" onClick={() => { 
-             if(window.confirm('确定要彻底删除这个错题档案吗？此操作无法撤销。')) {
-               onDelete(); // 调用父级绑定的删除
-             }
+             if(window.confirm('确定要彻底删除？')) onDelete();
              setShowMenu(false); 
           }}>
             <Trash2 size={16} /> 彻底删除
@@ -491,76 +502,76 @@ function ReviewCard({
         </div>
       )}
 
-      {/* --- B. 题目内容 --- */}
+      {/* 题目内容 */}
       <div className="review-content" style={{whiteSpace: 'pre-wrap'}}>
         {question.content}
       </div>
 
-      {/* --- C. 底部信息栏 --- */}
+      {/* 底部信息栏 */}
       <div className="review-footer">
         
-        {/* 左侧：标签信息 */}
-        <div style={{display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap'}}>
+        {/* ★★★ 左侧信息组：统一放在 footer-info 里 ★★★ */}
+        <div className="footer-info">
           
-          {/* 状态标签：区分普通等级 和 毕业状态 */}
+          {/* 1. 状态标签 */}
           {question.isGraduated ? (
             <span className="mini-tag" style={{background:'#f3e8ff', color:'#702963', fontWeight:'bold', display:'flex', alignItems:'center', gap:'4px'}}>
-              <GraduationCap size={14}/> 
-              {readOnly ? '已毕业' : '毕业抽查'} {/* 在数据库显示已毕业，在首页显示抽查 */}
+              <GraduationCap size={14}/> {readOnly ? '已毕业' : '毕业抽查'}
             </span>
           ) : (
             <span className="mini-tag">Lv.{question.streak}</span>
           )}
           
-          {/* 规则名称 */}
+          {/* 2. 规则名称 */}
           <span className="mini-tag">{profileName}</span>
-          
-          {/* 未来预测时间 (仅在非毕业且是未来视图时显示) */}
-          {isFuture && !question.isGraduated && (
-            <span className="mini-tag" style={{background:'#fef3c7', color:'#d97706'}}>
-              {question.nextReviewDate}
-            </span>
-          )}
+
+          {/* 4. ★★★ 历史回溯按钮 (现在它是这一行的第四个元素) ★★★ */}
+          <button 
+            className={`btn-toggle-history ${showHistory ? 'active' : ''}`}
+            onClick={() => setShowHistory(!showHistory)}
+            title="查看复习历史"
+          >
+            <History size={14} /> 
+            {history.length > 0 ? `${history.length}次` : '新题'}
+          </button>
         </div>
 
-        {/* 右侧：操作按钮组 */}
-        {/* 显示条件：非只读模式 AND 非未来视图 */}
-        {/* 注意：即使是 isGraduated，只要出现在这里(说明是抽查日)，也需要显示按钮 */}
-        {!readOnly && !isFuture && (
+        {/* 右侧按钮组 (保持不变) */}
+        {!readOnly && !isFuture && !question.isGraduated && (
           <div className="action-row">
-             
-             {/* 1. 忘了 (X) */}
-             <button 
-                className="icon-btn btn-forgot" 
-                onClick={() => onReview(question.id, false)}
-                title="忘了 (退步)"
-             >
+             <button className="icon-btn btn-forgot" onClick={() => onReview(question.id, false)}>
                 <X size={24} strokeWidth={3} />
              </button>
-
-             {/* 2. 记得 (Check) 或 毕业 (Cap) */}
-             {/* 如果即将毕业(且当前还没毕业)，显示紫色帽子 */}
-             {!question.isGraduated && isNextGraduation ? (
-                <button 
-                  className="icon-btn btn-graduate" 
-                  onClick={() => onReview(question.id, true)}
-                  title="点击毕业！(Byzantine Purple)"
-                >
+             {isNextGraduation ? (
+                <button className="icon-btn btn-graduate" onClick={() => onReview(question.id, true)}>
                   <GraduationCap size={24} strokeWidth={3} />
                 </button>
              ) : (
-                // 否则(普通升级 或 毕业生保级)，显示绿色对勾
-                <button 
-                  className="icon-btn btn-remember" 
-                  onClick={() => onReview(question.id, true)}
-                  title="记得 (保持)"
-                >
+                <button className="icon-btn btn-remember" onClick={() => onReview(question.id, true)}>
                   <Check size={24} strokeWidth={3} />
                 </button>
              )}
           </div>
         )}
       </div>
+
+      {/* ★★★ 折叠的历史记录区域 ★★★ */}
+      {showHistory && (
+        <div className="history-section">
+          <span className="history-label">
+            <Clock size={12} style={{marginRight:'4px', verticalAlign:'text-bottom'}}/>
+            起始日: {firstDate.format('YYYY-MM-DD')}
+          </span>
+          
+          <div className="history-tags-wrapper">
+            {/* 渲染真正的历史 */}
+            {renderHistoryTags()}
+            
+            {history.length === 0 && <span style={{fontSize:'0.8rem', color:'#ccc'}}>暂无复习记录</span>}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -850,7 +861,7 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
   const [formStep, setFormStep] = useState(activeProfile.regressStep);
   // ★ 新增：维保间隔状态
   const [formGradInterval, setFormGradInterval] = useState(activeProfile.graduationInterval || 0);
-
+  
   // 切换规则时，同步表单数据
   useEffect(() => {
     setFormName(activeProfile.name);
@@ -861,20 +872,41 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
   }, [activeProfile]);
 
   const handleAddProfile = () => {
+    let baseName = "新规则";
+    let newName = baseName;
+    let counter = 1;
+
+    // 循环检查：如果名字已存在，就一直加序号，直到找到一个没被占用的
+    while (settings.profiles.some(p => p.name === newName)) {
+      newName = `${baseName} ${counter}`;
+      counter++;
+    }
+
     const newId = `custom_${Date.now()}`;
     const newProfile = {
       id: newId,
-      name: "新规则",
+      name: newName, // 使用计算出的不重复名字
       intervals: [1, 3, 7],
       regressStep: 1,
       graduationInterval: 0
     };
+    
     setSettings({ ...settings, profiles: [...settings.profiles, newProfile] });
-    setActiveId(newId);
+    setActiveId(newId); // 自动跳转到新规则
   };
 
   const handleSave = () => {
-    // 1. 校验间隔序列
+    // 1. 校验名称 (去重逻辑)
+    const trimmedName = formName.trim();
+    if (!trimmedName) return alert("❌ 规则名称不能为空");
+
+    // 检查是否有别的人用了这个名字 (排除掉自己)
+    const isDuplicate = settings.profiles.some(p => p.name === trimmedName && p.id !== activeId);
+    if (isDuplicate) {
+      return alert(`❌ 名称重复：已存在名为 "${trimmedName}" 的规则，请换一个名字。`);
+    }
+
+    // 2. 校验间隔序列
     const rawIntervals = formIntervals.split(/[,，\s]+/);
     const newIntervals = [];
     for (let s of rawIntervals) {
@@ -883,18 +915,18 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
       if (isNaN(num) || num < 0) return alert(`❌ 间隔输入错误："${s}" 无效`);
       newIntervals.push(num);
     }
-    if (newIntervals.length === 0) return alert("❌ 至少需要设置一个间隔");
-    
-    // 2. 校验毕业间隔
+    if (newIntervals.length === 0) return alert("❌ 需至少一个间隔");
+
+    // 3. 校验毕业维保
     const gradInt = parseInt(formGradInterval);
     if (isNaN(gradInt) || gradInt < 0) return alert("❌ 毕业检查间隔无效");
 
-    // 3. 更新 Settings
+    // --- 4. 更新 Settings 数据 ---
     const updatedProfiles = settings.profiles.map(p => {
       if (p.id === activeId) {
         return {
           ...p,
-          name: formName,
+          name: trimmedName,
           intervals: newIntervals,
           regressStep: formStep,
           graduationInterval: gradInt
@@ -903,21 +935,20 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
       return p;
     });
 
-    // 4. 更新 Questions (应用状态感知逻辑)
-    // 构造一个临时的 oldProfile 对象，方便复用上面的逻辑函数
+    // --- 5. 更新 Questions 数据 (全量清洗) ---
+    // 准备旧数据对象，用于计算差值
     const oldProfile = activeProfile;
-    // 构造一个临时的 newProfile 对象
-    const newProfile = { 
-        intervals: newIntervals, 
-        graduationInterval: gradInt 
-    };
+    // 准备新数据对象
+    const newProfile = { intervals: newIntervals, graduationInterval: gradInt };
 
     const updatedQuestions = questions.map(q => {
+      // 只处理属于当前规则的题
       if (q.settingId !== activeId) return q;
 
+      // A. 预判新的毕业状态
       const isNowGraduated = q.streak >= newIntervals.length;
 
-      // --- 逻辑复用 ---
+      // B. 计算时差 (复用状态感知逻辑)
       const getEffectiveInterval = (profile, streak, isGradState) => {
         if (isGradState) {
           return parseInt(profile.graduationInterval || 0);
@@ -929,24 +960,41 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
 
       const valOld = getEffectiveInterval(oldProfile, q.streak, q.isGraduated);
       const valNew = getEffectiveInterval(newProfile, q.streak, isNowGraduated);
-
       const diff = valNew - valOld;
 
+      // C. 应用日期平移
       let newDate = q.nextReviewDate;
       if (q.nextReviewDate === '🏁 已毕业') {
+         // 兼容旧数据：如果复活了，重置为今天
          if (!isNowGraduated || gradInt > 0) newDate = dayjs().format('YYYY-MM-DD');
       } else if (diff !== 0) {
          newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
       }
 
-      return { ...q, nextReviewDate: newDate, isGraduated: isNowGraduated };
+      // D. 历史记录修正 (紫色变绿色)
+      let newHistory = q.history || [];
+      if (q.isGraduated && !isNowGraduated) {
+        newHistory = newHistory.map(record => {
+          if (record.result === 'graduated') {
+            return { ...record, result: 'correct' }; // 褪色处理
+          }
+          return record;
+        });
+      }
+
+      return {
+        ...q,
+        nextReviewDate: newDate,
+        isGraduated: isNowGraduated,
+        history: newHistory
+      };
     });
 
+    // 提交所有更改
     setSettings({ ...settings, profiles: updatedProfiles });
     setQuestions(updatedQuestions);
     alert("✅ 规则已更新");
   };
-
   const handleSetDefault = () => { setSettings({ ...settings, defaultId: activeId }); };
   
   const handleDelete = () => {

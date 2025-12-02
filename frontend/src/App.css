@@ -464,24 +464,31 @@ select {
   padding-right: 30px; /* 给右上角图标留位置 */
 }
 
-/* 底部信息栏 */
+/* --- 底部栏容器 --- */
 .review-footer {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  justify-content: space-between; /* 左右两端对齐 */
+  align-items: center;            /* 垂直居中 */
   margin-top: 15px;
   padding-top: 15px;
-  border-top: 1px solid #f5f5f7; /* Apple 灰 */
+  border-top: 1px solid #f5f5f7;
+  /* 关键：防止高度坍塌 */
+  height: 40px; 
 }
 
-/* 标签样式 */
+/* 标签样式微调 */
 .mini-tag {
+  display: inline-flex; /* 确保标签本身也是好排版的 */
+  align-items: center;
+  justify-content: center;
   font-size: 0.75rem;
   padding: 4px 8px;
   background: #f5f5f7;
   color: #86868b;
   border-radius: 6px;
   font-weight: 500;
+  height: 24px; /* 固定高度 */
+  white-space: nowrap; /* 防止标签内文字换行 */
 }
 
 /* --- 2. 苹果风按钮组 (Action Buttons) --- */
@@ -713,4 +720,117 @@ select {
   text-align: center;
   padding: 60px 20px;
   color: #94a3b8;
+}
+
+/* --- 历史记录折叠面板 --- */
+.history-section {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px dashed #f0f0f0;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.history-label {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* 胶囊容器：横向滚动，防止溢出 */
+.history-tags-wrapper {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* --- 核心：微型胶囊 Tag --- */
+.history-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px; /* 胶囊圆角 */
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Menlo', monospace; /* 等宽字体让数字对齐更美 */
+  border: 1px solid transparent;
+  user-select: none;
+}
+
+/* 🟢 做对 (Green) */
+.history-tag.correct {
+  background-color: #dcfce7;
+  color: #166534;
+  border-color: rgba(22, 101, 52, 0.1);
+}
+
+/* 🔴 做错 (Red) */
+.history-tag.wrong {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border-color: rgba(153, 27, 27, 0.1);
+}
+
+/* 🟣 毕业/维保 (Purple) */
+.history-tag.graduated {
+  background-color: #f3e8ff;
+  color: #6b21a8;
+  border-color: rgba(107, 33, 168, 0.1);
+}
+
+/* 起始日标签 (灰色) */
+.history-tag.start {
+  background-color: #f3f4f6;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+}
+
+/* --- 触发按钮 --- */
+.btn-toggle-history {
+  /* 确保它表现得像一个 Flex 子元素 */
+  display: inline-flex; 
+  align-items: center;
+  justify-content: center;
+  
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  cursor: pointer;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s;
+  height: 24px; /* 与标签高度一致 */
+  line-height: 1;
+  white-space: nowrap; /* 防止文字换行 */
+}
+
+
+.btn-toggle-history:hover {
+  background-color: #f1f5f9;
+  color: var(--primary);
+}
+
+/* --- ★★★ 核心修复：左侧信息组 ★★★ --- */
+.footer-info {
+  /* 1. 强制变成弹性盒子，子元素横向排列 */
+  display: flex; 
+  
+  /* 2. 垂直居中对齐 */
+  align-items: center; 
+  
+  /* 3. 元素间距 */
+  gap: 8px; 
+  
+  /* 4. ★关键★：禁止换行！强制在同一行显示 */
+  flex-wrap: nowrap; 
 }
