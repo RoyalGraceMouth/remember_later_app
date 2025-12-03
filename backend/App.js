@@ -8,6 +8,8 @@ require('dotenv').config();
 
 const app = express();
 
+app.use('/api/data', require('./routes/data'));
+
 // --- 中间件配置 ---
 app.use(cors()); // 允许前端 React (localhost:5173) 访问
 app.use(express.json()); // 解析 JSON 请求体
@@ -97,3 +99,4 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 后端服务器运行在: http://localhost:${PORT}`);
 });
+
