@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import './App.css'; 
 import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon , GraduationCap,History,Clock} from 'lucide-react';
 import {Search,Database} from 'lucide-react';
+import { api } from './api';
 
 // --- 默认设置 ---
 const DEFAULT_SETTINGS_DATA = {
@@ -32,7 +33,11 @@ function App() {
   // 1. 用户状态
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('my_app_user');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null; // 防止解析错误导致白屏
+    }
   });
 
   // 2. 错题数据
@@ -222,7 +227,9 @@ function App() {
   };
 
   // 登录退出
-  const login = (name) => setUser({ name, avatar: '👤' });
+  const login = (userData) => {
+    setUser({ ...userData, avatar: '👤' });
+  };
   const logout = () => setUser(null);
 
   return (
@@ -257,6 +264,7 @@ function App() {
               settings={settings} // 记得传 settings 给它，因为编辑模态框需要
             />
           } />
+          <Route path="/register" element={<RegisterPage />} />
         </Routes>
       </div>
     </BrowserRouter>
@@ -441,7 +449,7 @@ function ReviewCard({
   readOnly = false 
 }) {
   const [showMenu, setShowMenu] = useState(false);
-  const [showHistory, setShowHistory] = useState(false); // ★ 控制折叠
+  const [showHistory, setShowHistory] = useState(false);
   
   const profile = getProfileById ? getProfileById(question.settingId) : null;
   const profileName = profile?.name || '默认规则';
@@ -449,28 +457,20 @@ function ReviewCard({
   // 毕业预判
   const isNextGraduation = profile && profile.intervals && (question.streak + 1 >= profile.intervals.length);
 
-  // 样式处理
+  // 样式
   const cardClass = `review-item ${question.isGraduated ? 'graduated-style' : ''}`;
   const cardStyle = question.isGraduated 
     ? { background: '#faf5ff', borderColor: '#e9d5ff' } 
     : {};
 
-  // --- ★ 计算历史 Tag 数据 ★ ---
+  // 历史数据处理
   const history = question.history || [];
-  
-  // 确定“初次学习日期”
-  // 如果有历史记录，取第一条的日期；如果没有，取创建时间(id)；如果都没有，取今天
-  const firstDate = history.length > 0 
-    ? dayjs(history[0].date) 
-    : dayjs(question.id); // 假设 ID 是时间戳
+  const firstDate = history.length > 0 ? dayjs(history[0].date) : dayjs(question.id);
 
   const renderHistoryTags = () => {
     return history.map((record, index) => {
-      // 计算 D?：当前记录日期 - 初次日期
       const diffDays = dayjs(record.date).diff(firstDate, 'day');
-      // 防止显示负数 (极少数情况)
       const displayDay = diffDays >= 0 ? diffDays : 0;
-      
       return (
         <span key={index} className={`history-tag ${record.result}`} title={`${record.date} (${record.result})`}>
           D{displayDay}
@@ -478,6 +478,26 @@ function ReviewCard({
       );
     });
   };
+
+  // ★★★ 关键判断：当前是否显示操作按钮？ ★★★
+  // 条件：非只读 且 非未来 且 (未毕业 或者 虽然毕业但今天需要抽查)
+  // 注意：原来的逻辑是 !readOnly && !isFuture && !question.isGraduated
+  // 但我们之前改过逻辑，只要出现在今日列表里，即使是毕业抽查也要显示按钮。
+  // 所以这里简化判断：只要不是只读且不是未来预览，就认为有操作区。
+  const hasActions = !readOnly && !isFuture;
+
+  // ★★★ 提取历史按钮 JSX (避免重复写代码) ★★★
+  const HistoryButton = (
+    <button 
+      className={`btn-toggle-history ${showHistory ? 'active' : ''}`}
+      onClick={() => setShowHistory(!showHistory)}
+      title="查看复习历史"
+    >
+      <History size={14} /> 
+      {/* 这里的数字即使变成 100次 也能自适应显示了 */}
+      {history.length > 0 ? `${history.length}次` : '新题'}
+    </button>
+  );
 
   return (
     <div className={cardClass} style={cardStyle} onMouseLeave={() => setShowMenu(false)}>
@@ -487,14 +507,15 @@ function ReviewCard({
         <MoreHorizontal size={20} />
       </button>
 
-      {/* 菜单下拉 */}
       {showMenu && (
         <div className="menu-dropdown">
           <div className="menu-item" onClick={() => { onEdit(); setShowMenu(false); }}>
             <Edit2 size={16} /> 编辑 / 改规则
           </div>
           <div className="menu-item delete" onClick={() => { 
-             if(window.confirm('确定要彻底删除？')) onDelete();
+             if(window.confirm('确定要彻底删除这个错题档案吗？此操作无法撤销。')) {
+               onDelete(); 
+             }
              setShowMenu(false); 
           }}>
             <Trash2 size={16} /> 彻底删除
@@ -502,113 +523,80 @@ function ReviewCard({
         </div>
       )}
 
-      {/* 题目内容 */}
+      {/* 内容 */}
       <div className="review-content" style={{whiteSpace: 'pre-wrap'}}>
         {question.content}
       </div>
 
-      {/* 底部信息栏 */}
+      {/* 底部栏 */}
       <div className="review-footer">
         
-        {/* ★★★ 左侧信息组：统一放在 footer-info 里 ★★★ */}
+        {/* --- 左侧区域 --- */}
         <div className="footer-info">
           
-          {/* 1. 状态标签 */}
-          {question.isGraduated ? (
-            <span className="mini-tag" style={{background:'#f3e8ff', color:'#702963', fontWeight:'bold', display:'flex', alignItems:'center', gap:'4px'}}>
-              <GraduationCap size={14}/> {readOnly ? '已毕业' : '毕业抽查'}
+          {/* 1. 华丽等级 */}
+          <span className={`rank-badge ${getLevelClassName(question.streak)}`}>
+            Lv.{question.streak}
+          </span>
+
+          {/* 2. 毕业/抽查辅助标签 */}
+          {question.isGraduated && (
+            <span className="mini-tag" style={{
+              background: '#f3e8ff', color: '#702963', fontWeight: 'bold', 
+              display: 'flex', alignItems: 'center', gap:'3px', border: '1px solid rgba(112, 41, 99, 0.1)'
+            }}>
+              <GraduationCap size={12}/> {readOnly ? '毕业' : '抽查'}
             </span>
-          ) : (
-            <span className="mini-tag">Lv.{question.streak}</span>
           )}
           
-          {/* 2. 规则名称 */}
+          {/* 3. 规则名称 */}
           <span className="mini-tag">{profileName}</span>
 
-          {/* 4. ★★★ 历史回溯按钮 (现在它是这一行的第四个元素) ★★★ */}
-          <button 
-            className={`btn-toggle-history ${showHistory ? 'active' : ''}`}
-            onClick={() => setShowHistory(!showHistory)}
-            title="查看复习历史"
-          >
-            <History size={14} /> 
-            {history.length > 0 ? `${history.length}次` : '新题'}
-          </button>
+          {/* ★★★ 布局逻辑 A：如果有操作按钮，历史按钮放在左边，贴着规则 ★★★ */}
+          {hasActions && HistoryButton}
+
         </div>
 
-        {/* 右侧按钮组 (保持不变) */}
-        {!readOnly && !isFuture && !question.isGraduated && (
-          <div className="action-row">
-             <button className="icon-btn btn-forgot" onClick={() => onReview(question.id, false)}>
-                <X size={24} strokeWidth={3} />
-             </button>
-             {isNextGraduation ? (
-                <button className="icon-btn btn-graduate" onClick={() => onReview(question.id, true)}>
-                  <GraduationCap size={24} strokeWidth={3} />
-                </button>
-             ) : (
-                <button className="icon-btn btn-remember" onClick={() => onReview(question.id, true)}>
-                  <Check size={24} strokeWidth={3} />
-                </button>
-             )}
-          </div>
-        )}
+        {/* --- 右侧区域 --- */}
+        <div style={{display:'flex', gap:'12px', alignItems:'center'}}>
+          
+          {/* ★★★ 布局逻辑 B：如果没有操作按钮，历史按钮放在右边 ★★★ */}
+          {!hasActions && HistoryButton}
+
+          {/* 操作按钮组 */}
+          {hasActions && (
+            <div className="action-row">
+               <button className="icon-btn btn-forgot" onClick={() => onReview(question.id, false)}>
+                  <X size={24} strokeWidth={3} />
+               </button>
+               {isNextGraduation ? (
+                  <button className="icon-btn btn-graduate" onClick={() => onReview(question.id, true)}>
+                    <GraduationCap size={24} strokeWidth={3} />
+                  </button>
+               ) : (
+                  <button className="icon-btn btn-remember" onClick={() => onReview(question.id, true)}>
+                    <Check size={24} strokeWidth={3} />
+                  </button>
+               )}
+            </div>
+          )}
+        </div>
+
       </div>
 
-      {/* ★★★ 折叠的历史记录区域 ★★★ */}
+      {/* 历史记录展开区 */}
       {showHistory && (
         <div className="history-section">
           <span className="history-label">
             <Clock size={12} style={{marginRight:'4px', verticalAlign:'text-bottom'}}/>
-            起始日: {firstDate.format('YYYY-MM-DD')}
+            记忆轨迹 (起始日: {firstDate.format('YYYY-MM-DD')})
           </span>
-          
           <div className="history-tags-wrapper">
-            {/* 渲染真正的历史 */}
             {renderHistoryTags()}
-            
             {history.length === 0 && <span style={{fontSize:'0.8rem', color:'#ccc'}}>暂无复习记录</span>}
           </div>
         </div>
       )}
-
-    </div>
-  );
-}
-
-function EditModal({ question, settings, onClose, onSave }) {
-  const [content, setContent] = useState(question.content);
-  const [settingId, setSettingId] = useState(question.settingId);
-
-  const handleSave = () => {
-    onSave(question.id, content, settingId);
-    onClose();
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <h3 style={{marginTop:0}}>✏️ 编辑错题</h3>
-        
-        <label style={{display:'block', marginBottom:'5px', color:'#666', fontSize:'0.9rem'}}>题目内容</label>
-        <textarea 
-          value={content} 
-          onChange={e => setContent(e.target.value)}
-          rows="5"
-        />
-
-        <label style={{display:'block', marginBottom:'5px', color:'#666', fontSize:'0.9rem', marginTop:'15px'}}>复习规则</label>
-        <select value={settingId} onChange={e => setSettingId(e.target.value)}>
-          {settings.profiles.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-
-        <div className="modal-actions">
-          <button className="btn-outline" onClick={onClose} style={{width:'auto'}}>取消</button>
-          <button className="btn-primary" onClick={handleSave} style={{width:'auto'}}>保存</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -718,40 +706,47 @@ function DatabasePage({ questions, onDelete, onUpdate, getProfileById, settings 
 // 4. 登录页
 function LoginPage({ onLogin }) {
   const [name, setName] = useState("");
+  const [password, setPassword] = useState(""); // 新增密码状态
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name) return alert("请输入用户名");
-    onLogin(name);
-    navigate('/');
+    if (!name || !password) return alert("请输入账号密码");
+
+    try {
+      // ★ 调用后端接口
+      const data = await api.post('/login', { username: name, password: password });
+      
+      // 1. 存 Token (这是以后访问数据的钥匙)
+      localStorage.setItem('token', data.token);
+      
+      // 2. 告诉 App 我登录了
+      onLogin(data.user);
+      
+      alert('欢迎回来！');
+      navigate('/');
+    } catch (err) {
+      alert(`登录失败: ${err.message}`);
+    }
   };
 
   return (
     <div className="page-center-wrapper">
-      <div className="card" style={{width: '100%', maxWidth: '400px'}}>
-        <h2 style={{textAlign: 'center'}}>👋 欢迎回来</h2>
-        <p style={{textAlign: 'center', color: '#666', marginBottom: '30px'}}>继续你的间隔重复复习之旅</p>
-        
+      <div className="card" style={{width: '100%', maxWidth: '400px', margin: '0 auto'}}>
+        <h2 style={{textAlign: 'center'}}>👋 登录</h2>
         <form onSubmit={handleSubmit}>
-          <div style={{marginBottom: '20px'}}>
-            <label style={{display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: '#374151'}}>用户名</label>
-            <input 
-              type="text" 
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="例如: RoyalGrace"
-            />
+          <div style={{marginBottom: '15px'}}>
+            <label>用户名</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)} />
           </div>
-          <div style={{marginBottom: '30px'}}>
-            <label style={{display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: '#374151'}}>密码</label>
-            <input type="password" placeholder="••••••••" />
+          <div style={{marginBottom: '15px'}}>
+            <label>密码</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} />
           </div>
           <button type="submit" className="btn-primary">立即登录</button>
         </form>
-        
-        <p style={{textAlign: 'center', marginTop: '20px', color: '#6b7280', fontSize: '0.9rem'}}>
-          还没有账号？ <Link to="/register" style={{color: 'var(--primary)', textDecoration: 'none'}}>去注册</Link>
+        <p style={{textAlign:'center', marginTop:'15px'}}>
+          没有账号? <Link to="/register">去注册</Link>
         </p>
       </div>
     </div>
@@ -760,19 +755,45 @@ function LoginPage({ onLogin }) {
 
 // 5. 注册页
 function RegisterPage() {
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name || !password) return alert("请输入完整");
+
+    try {
+      // ★ 调用注册接口
+      await api.post('/register', { username: name, password: password });
+      
+      alert('注册成功！请登录');
+      navigate('/login'); // 跳去登录页
+    } catch (err) {
+      alert(`注册失败: ${err.message}`);
+    }
+  };
+
   return (
-    <div className="auth-container card">
-      <h2>🚀 创建账号</h2>
-      <input type="text" placeholder="设置用户名" />
-      <input type="email" placeholder="电子邮箱" />
-      <input type="password" placeholder="设置密码" />
-      <button className="btn-primary">立即注册</button>
-      <p style={{marginTop: '15px'}}>
-        已有账号？ <Link to="/login">去登录</Link>
-      </p>
+    <div className="page-center-wrapper">
+      <div className="card" style={{width: '100%', maxWidth: '400px', margin: '0 auto'}}>
+        <h2 style={{textAlign: 'center'}}>🚀 创建账号</h2>
+        <form onSubmit={handleSubmit}>
+          <div style={{marginBottom: '15px'}}>
+            <label>用户名</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <div style={{marginBottom: '15px'}}>
+            <label>密码</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} />
+          </div>
+          <button type="submit" className="btn-primary">注册</button>
+        </form>
+      </div>
     </div>
   );
 }
+
 
 // 6. 个人中心：充实内容，拒绝留白
 function ProfilePage({ user, questions, onLogout }) {
@@ -1227,6 +1248,61 @@ function Calendar({ questions, selectedDate, onDateSelect, getProfileById }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+const getLevelClassName = (streak) => {
+    if (streak < 3) return 'rank-stone';   // Lv.0 - 2 (原石)
+    if (streak < 6) return 'rank-bronze';  // Lv.3 - 5 (青铜)
+    if (streak < 10) return 'rank-silver'; // Lv.6 - 9 (白银)
+    if (streak < 15) return 'rank-gold';   // Lv.10 - 14 (黑金)
+    return 'rank-diamond';                 // Lv.15+ (璀璨钻石)
+};
+
+// src/App.jsx 放到文件最下方
+
+// --- 补上缺失的 EditModal 组件 ---
+function EditModal({ question, settings, onClose, onSave }) {
+  const [content, setContent] = useState(question.content);
+  // 这里加个 safe check，防止 question.settingId 为空导致崩溃
+  const [settingId, setSettingId] = useState(question.settingId || settings.defaultId);
+
+  const handleSave = () => {
+    // 调用父组件传下来的保存函数
+    onSave(question.id, content, settingId);
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <h3 style={{marginTop:0}}>✏️ 编辑错题</h3>
+        
+        <label style={{display:'block', marginBottom:'5px', color:'#666', fontSize:'0.9rem'}}>题目内容</label>
+        <textarea 
+          value={content} 
+          onChange={e => setContent(e.target.value)}
+          rows="5"
+          style={{width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd'}}
+        />
+
+        <label style={{display:'block', marginBottom:'5px', color:'#666', fontSize:'0.9rem', marginTop:'15px'}}>复习规则</label>
+        <select 
+          value={settingId} 
+          onChange={e => setSettingId(e.target.value)}
+          style={{width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd'}}
+        >
+          {settings.profiles.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+
+        <div className="modal-actions">
+          <button className="btn-outline" onClick={onClose} style={{width:'auto'}}>取消</button>
+          <button className="btn-primary" onClick={handleSave} style={{width:'auto'}}>保存</button>
+        </div>
       </div>
     </div>
   );

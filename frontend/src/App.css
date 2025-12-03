@@ -795,29 +795,40 @@ select {
 
 /* --- 触发按钮 --- */
 .btn-toggle-history {
-  /* 确保它表现得像一个 Flex 子元素 */
+  background: transparent;
+  border: 1px solid transparent;
+  
+  font-size: 0.75rem; 
+  height: 24px;
+  line-height: 1;
+  color: #94a3b8;
+  
   display: inline-flex; 
   align-items: center;
   justify-content: center;
   
-  background: transparent;
-  border: 1px solid transparent;
-  font-size: 0.75rem;
-  color: #94a3b8;
+  /* ★ 关键修改：收紧间距 ★ */
+  gap: 2px;        /* 图标和数字靠得更近 */
+  padding: 0 4px;  /* 左右留白变小 */
+  
+  width: auto; 
+  min-width: fit-content;
+  flex-shrink: 0;
+  white-space: nowrap;
+  
   cursor: pointer;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 6px;
   transition: all 0.2s;
-  height: 24px; /* 与标签高度一致 */
-  line-height: 1;
-  white-space: nowrap; /* 防止文字换行 */
+  border-radius: 4px; /* 圆角稍微改小一点点，更硬朗一点，显瘦 */
 }
-
-
 .btn-toggle-history:hover {
   background-color: #f1f5f9;
   color: var(--primary);
+}
+
+.btn-toggle-history.active {
+  background-color: #eef2ff;
+  color: var(--primary);
+  font-weight: 500;
 }
 
 /* --- ★★★ 核心修复：左侧信息组 ★★★ --- */
@@ -833,4 +844,144 @@ select {
   
   /* 4. ★关键★：禁止换行！强制在同一行显示 */
   flex-wrap: nowrap; 
+}
+
+/* src/App.css -> 顶级质感等级 Tag */
+
+/* --- 0. 基础架构 --- */
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 6px; /* 像一枚精致的芯片/铭牌 */
+  
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 800; /* 特粗字体，更有力量感 */
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+  
+  /* 默认过渡效果 */
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: relative;
+  overflow: hidden; /* 锁住光效 */
+  user-select: none;
+}
+
+/* 鼠标悬停时的微动效 (通用) */
+.rank-badge:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+/* --- 1. 原石 (Stone): Lv.0-2 --- */
+/* 设计理念：Apple 磨砂灰，低调，代表开始 */
+.rank-stone {
+  background-color: #f3f4f6;
+  color: #9ca3af;
+  border: 1px solid #e5e7eb;
+  /* 细微的内阴影，增加厚度感 */
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.03);
+}
+
+/* --- 2. 青铜 (Bronze): Lv.3-5 --- */
+/* 设计理念：氧化红铜，温暖，金属拉丝感 */
+.rank-bronze {
+  /* 暖色斜向渐变 */
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  color: #9a3412; /* 深褐红文字 */
+  border: 1px solid #fed7aa;
+  
+  /* 底部高光 + 投影 */
+  box-shadow: 
+    inset 0 1px 0 rgba(255,255,255,0.8), /* 顶部反光 */
+    0 2px 4px rgba(154, 52, 18, 0.1);    /* 柔和投影 */
+}
+
+/* --- 3. 白银 (Silver): Lv.6-9 --- */
+/* 设计理念：液态水银，冷冽，精英感 */
+.rank-silver {
+  /* 复杂的金属光泽渐变 */
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 45%, #e2e8f0 50%, #f8fafc 100%);
+  color: #475569; /* 深蓝灰 */
+  border: 1px solid #cbd5e1;
+  
+  /* 金属质感阴影 */
+  box-shadow: 
+    0 2px 4px rgba(0,0,0,0.05), 
+    inset 0 0 0 1px rgba(255,255,255,0.5); /* 内部描边 */
+  text-shadow: 0 1px 0 rgba(255,255,255,0.8); /* 文字刻蚀感 */
+}
+
+/* --- 4. 黄金 (Gold): Lv.10-14 --- */
+/* 设计理念：黑金奢华 (Black Gold)，文字镂空金箔 */
+.rank-gold {
+  background: #1a1a1a; /* 纯黑底色 */
+  border: 1px solid #854d0e; /* 暗金边框 */
+  
+  /* ★ 核心技法：文字变成金色渐变 ★ */
+  background-image: linear-gradient(to bottom, #fde047, #eab308); /* 亮黄 -> 暗金 */
+  -webkit-background-clip: text; /* 裁剪背景到文字 */
+  background-clip: text;
+  color: transparent; /* 文字透明，透出背景的金 */
+  
+  /* 外部金色辉光 */
+  box-shadow: 0 4px 10px rgba(234, 179, 8, 0.25);
+}
+
+/* 黄金微光流过 (稍微动一下) */
+.rank-gold:hover {
+  background-image: linear-gradient(to bottom, #fef08a, #ca8a04);
+  box-shadow: 0 4px 15px rgba(234, 179, 8, 0.4);
+}
+
+/* --- 5. 钻石 (Diamond): Lv.15+ --- */
+/* 设计理念：全息极光 (Holographic)，呼吸发光，流光溢彩 */
+.rank-diamond {
+  /* 极光背景：青->蓝->紫 */
+  background: linear-gradient(135deg, #22d3ee 0%, #3b82f6 50%, #8b5cf6 100%);
+  color: white;
+  border: none;
+  
+  /* 强烈的发光效果 */
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.5), inset 0 0 0 1px rgba(255,255,255,0.3);
+  
+  /* 呼吸动画 */
+  animation: diamond-pulse 3s infinite alternate;
+}
+
+/* ★ 钻石专属：一道白光划过表面的特效 ★ */
+.rank-diamond::after {
+  content: '';
+  position: absolute;
+  top: -50%; 
+  left: -50%;
+  width: 200%; 
+  height: 200%;
+  
+  /* 白光带 */
+  background: linear-gradient(
+    to right, 
+    rgba(255,255,255,0) 0%, 
+    rgba(255,255,255,0.8) 50%, 
+    rgba(255,255,255,0) 100%
+  );
+  
+  transform: rotate(30deg);
+  /* 4秒扫过一次 */
+  animation: diamond-shine 4s infinite linear;
+}
+
+/* 动画定义 */
+@keyframes diamond-pulse {
+  0% { box-shadow: 0 0 10px rgba(34, 211, 238, 0.4); }
+  100% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.7); } /* 呼吸变强 */
+}
+
+@keyframes diamond-shine {
+  0% { left: -100%; top: -100%; }
+  30% { left: 100%; top: 100%; } /* 快速划过 */
+  100% { left: 100%; top: 100%; } /* 停顿休息 */
 }
