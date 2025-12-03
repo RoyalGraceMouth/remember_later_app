@@ -89,4 +89,23 @@ router.delete('/question/:id', auth, async (req, res) => {
   res.json({ msg: 'Deleted' });
 });
 
+// 保存设置
+router.post('/settings', auth, async (req, res) => {
+  const { profiles, defaultId } = req.body;
+  const conn = await db;
+  
+  try {
+    const sql = `
+      UPDATE user_settings 
+      SET profiles = ?, default_id = ? 
+      WHERE user_id = ?
+    `;
+    await conn.query(sql, [JSON.stringify(profiles), defaultId, req.user.id]);
+    res.json({ msg: 'Settings Saved' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Save Settings Error');
+  }
+});
+
 module.exports = router;

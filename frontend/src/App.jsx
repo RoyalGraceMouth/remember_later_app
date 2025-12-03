@@ -6,29 +6,6 @@ import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon , Graduati
 import {Search,Database} from 'lucide-react';
 import { api } from './api';
 
-// // --- 默认设置 ---
-// const DEFAULT_SETTINGS_DATA = {
-//   // 存放所有的规则配置
-//   profiles: [
-//     { 
-//       id: 'default_1', 
-//       name: '默认算法', 
-//       intervals: [1, 2, 4, 7, 15, 30], 
-//       regressStep: 1,
-//       graduationInterval: 0 // ★ 新增：0代表永不检查，大于0代表毕业后每隔多少天检查
-//     },
-//     { 
-//       id: 'hard_mode', 
-//       name: '魔鬼训练 (包含当日)', 
-//       intervals: [0, 0, 1, 3, 7], // 0代表今天立刻再做一次
-//       regressStep: 2 ,
-//       graduationInterval: 0
-//     }
-//   ],
-//   // 当前默认使用的规则 ID
-//   defaultId: 'default_1'
-// };
-
 function App() {
   // 1. 用户状态
   const [user, setUser] = useState(() => {
@@ -41,29 +18,33 @@ function App() {
   });
 
   // 2. 错题数据
-  const [questions, setQuestions] = useState(() => {
-    const saved = localStorage.getItem('my_wrong_questions');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [questions, setQuestions] = useState([]); 
 
   // 3. 设置数据 (结构大改)
-  const [settings, setSettings] = useState(() => {
-    const saved = localStorage.getItem('my_app_settings');
-    // 如果是旧版数据（没有 profiles 字段），强制重置为新版，防止报错
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (!parsed.profiles) return DEFAULT_SETTINGS_DATA;
-      return parsed;
-    }
-    return DEFAULT_SETTINGS_DATA;
+  const [settings, setSettings] = useState({
+    profiles: [], // ★ 必须有这个字段
+    defaultId: ''
   });
 
     // 删除题目
-  const deleteQuestion = (id) => {
-    if (window.confirm("确定要删除这道错题吗？")) {
-      setQuestions(prev => prev.filter(q => q.id !== id));
+  const deleteQuestion = async (id) => { // ★ 加上 async
+    // 1. 前端立刻删掉
+    setQuestions(prev => prev.filter(q => q.id !== id));
+
+    // 2. 告诉后端删掉
+    try {
+      // 这里的路径对应 server/routes/data.js 里的 router.delete('/question/:id')
+      // 注意：api.js 里封装的方法可能叫 api.request(url, 'DELETE') 或者 api.delete(url)
+      // 假设你之前封装的 api.js 里没有显式的 delete 方法，可以用通用的 request：
+      await api.request(`/data/question/${id}`, 'DELETE');
+      console.log('✅ 删除成功');
+    } catch (err) {
+      console.error('❌ 删除同步失败', err);
+      alert('删除失败！');
+      // 极端情况：刷新页面重新拉取数据
     }
   };
+  
 
   const snoozeQuestion = (id, days = 1) => {
     setQuestions(prev => prev.map(q => {
@@ -82,80 +63,118 @@ function App() {
   };
   // 更新题目 (内容 或 规则)
   // ★★★ 修复版：修改题目内容或规则，并自动修正日期 ★★★
-  const updateQuestion = (id, newContent, newSettingId) => {
-    setQuestions(prev => prev.map(q => {
-      if (q.id !== id) return q;
+  const updateQuestion = async (id, newContent, newSettingId) => { // ★ 加上 async
+    const targetQ = questions.find(q => q.id === id);
+    if (!targetQ) return;
 
-      if (q.settingId === newSettingId) {
-        return { ...q, content: newContent };
+    // --- 计算逻辑 (和之前一样) ---
+    // 1. 没改规则，只改文字
+    if (targetQ.settingId === newSettingId) {
+      const updatedQ = { ...targetQ, content: newContent };
+      setQuestions(prev => prev.map(q => q.id === id ? updatedQ : q));
+      // 发送后端
+      api.post('/data/question', updatedQ).catch(console.error);
+      return;
+    }
+
+    // 2. 改了规则，计算时差
+    const oldProfile = getProfileById(targetQ.settingId);
+    const newProfile = getProfileById(newSettingId);
+    if (!oldProfile || !newProfile) return;
+
+    const isNowGraduated = targetQ.streak >= newProfile.intervals.length;
+
+    // 状态感知取值
+    const getEffectiveInterval = (profile, streak, isGradState) => {
+      if (isGradState) return parseInt(profile.graduationInterval || 0);
+      const index = Math.min(streak, profile.intervals.length - 1);
+      return profile.intervals[index] !== undefined ? profile.intervals[index] : 1;
+    };
+
+    const valOld = getEffectiveInterval(oldProfile, targetQ.streak, targetQ.isGraduated);
+    const valNew = getEffectiveInterval(newProfile, targetQ.streak, isNowGraduated);
+    const diff = valNew - valOld;
+
+    let newDate = targetQ.nextReviewDate;
+    if (targetQ.nextReviewDate === '🏁 已毕业') {
+      if (!isNowGraduated || newProfile.graduationInterval > 0) {
+         newDate = dayjs().format('YYYY-MM-DD');
       }
+    } else if (diff !== 0) {
+      newDate = dayjs(targetQ.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
+    }
 
-      const oldProfile = getProfileById(q.settingId);
-      const newProfile = getProfileById(newSettingId);
+    // 历史记录修正 (褪色)
+    let newHistory = targetQ.history || [];
+    if (targetQ.isGraduated && !isNowGraduated) {
+      newHistory = newHistory.map(r => r.result === 'graduated' ? { ...r, result: 'correct' } : r);
+    }
 
-      if (!oldProfile || !newProfile) {
-        return { ...q, content: newContent, settingId: newSettingId };
-      }
+    // ★★★ 生成新对象 ★★★
+    const updatedQ = {
+      ...targetQ,
+      content: newContent,
+      settingId: newSettingId,
+      nextReviewDate: newDate,
+      isGraduated: isNowGraduated,
+      history: newHistory
+    };
 
-      // 1. 预判新的毕业状态
-      const isNowGraduated = q.streak >= newProfile.intervals.length;
+    // 3. 前端更新
+    setQuestions(prev => prev.map(q => q.id === id ? updatedQ : q));
 
-      // --- 2. 日期修正逻辑 (保持之前的状态感知逻辑) ---
-      const getEffectiveInterval = (profile, streak, isGradState) => {
-        if (isGradState) {
-          return parseInt(profile.graduationInterval || 0);
-        } else {
-          const index = Math.min(streak, profile.intervals.length - 1);
-          return profile.intervals[index] !== undefined ? profile.intervals[index] : 1;
-        }
-      };
-
-      const valOld = getEffectiveInterval(oldProfile, q.streak, q.isGraduated);
-      const valNew = getEffectiveInterval(newProfile, q.streak, isNowGraduated);
-      const diff = valNew - valOld;
-
-      let newDate = q.nextReviewDate;
-      if (q.nextReviewDate === '🏁 已毕业') {
-        if (!isNowGraduated || newProfile.graduationInterval > 0) {
-           newDate = dayjs().format('YYYY-MM-DD');
-        }
-      } else if (diff !== 0) {
-        newDate = dayjs(q.nextReviewDate).add(diff, 'day').format('YYYY-MM-DD');
-      }
-
-      // --- ★★★ 新增：历史记录修正 (History Rewrite) ★★★ ---
-      let newHistory = q.history || [];
-
-      // 如果发生了“复活” (从毕业 -> 未毕业)
-      // 意味着以前所谓的“毕业”操作，现在看来只是普通的“做对”
-      if (q.isGraduated && !isNowGraduated) {
-        newHistory = newHistory.map(record => {
-          if (record.result === 'graduated') {
-            return { ...record, result: 'correct' }; // 紫色变绿色
-          }
-          return record;
-        });
-        console.log(`题目[${id}] 历史记录修正: 撤销毕业标记`);
-      }
-
-      return {
-        ...q,
-        content: newContent,
-        settingId: newSettingId,
-        nextReviewDate: newDate,
-        isGraduated: isNowGraduated,
-        history: newHistory // 更新历史
-      };
-    }));
+    // 4. 后端更新
+    try {
+      await api.post('/data/question', updatedQ);
+    } catch (err) {
+      console.error('❌ 编辑同步失败', err);
+    }
   };
 
   // 持久化
-  useEffect(() => { localStorage.setItem('my_wrong_questions', JSON.stringify(questions)); }, [questions]);
-  useEffect(() => { localStorage.setItem('my_app_settings', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { 
     if (user) localStorage.setItem('my_app_user', JSON.stringify(user));
     else localStorage.removeItem('my_app_user');
   }, [user]);
+    useEffect(() => {
+    // 1. 如果用户登录了 -> 去服务器拉取数据
+    if (user) {
+      // 定义一个异步函数来加载数据
+      const fetchData = async () => {
+        try {
+          // 调用后端 /api/data/sync 接口
+          const data = await api.get('/data/sync');
+          
+          // 后端返回 { questions: [...], settings: {...} }
+          // 如果是新用户，questions 可能是空，settings 可能是 null (后端没存的话)
+          setQuestions(data.questions || []);
+          
+          if (data.settings) {
+            // 注意：数据库存的是 JSON 字符串，后端可能已经解析了，也可能没解析
+            // 如果你在后端做了 JSON.parse，这里直接用；否则要 parse
+            // 假设后端返回的是对象：
+            setSettings(data.settings);
+          }
+        } catch (err) {
+          console.error("同步数据失败:", err);
+          // 如果 Token 过期了，强制退出
+          if (err.message.includes('401') || err.message.includes('无权限')) {
+            logout();
+          }
+        }
+      };
+      
+      fetchData();
+    } 
+    // 2. 如果用户没登录 (或者退出了) -> 清空本地数据，防止看到上一个人的
+    else {
+      setQuestions([]);
+      setSettings({
+    profiles: [], // ★ 必须有这个字段
+    defaultId: ''
+  });
+    }
+  }, [user]); // 依赖于 user，一变就执行
 
   // --- 辅助函数：根据ID找配置 ---
   const getProfileById = (id) => {
@@ -165,125 +184,124 @@ function App() {
   // --- 核心业务逻辑 ---
 
   // 添加错题：现在支持指定 settingId
-  const addQuestion = (content, settingId) => {
+  const addQuestion = async (content, settingId) => { // ★ 加上 async
     const targetId = settingId || settings.defaultId;
     const profile = getProfileById(targetId);
-
-    // ★ 关键修复：不能用 || 1，因为 0 也是有效值
-    // 如果 intervals[0] 存在，就用它；否则默认 1
+    
+    // 容错：防止 intervals[0] 不存在
     const firstInterval = profile.intervals[0] !== undefined ? profile.intervals[0] : 1;
 
     const newQ = {
-      id: Date.now(),
+      id: Date.now(), // 前端生成临时ID (虽然是大整数，但存入MySQL BIGINT没问题)
       content: content,
       streak: 0,
       settingId: targetId,
-      // dayjs().add(0, 'day') 依然是今天，这样就修好了
       nextReviewDate: dayjs().add(firstInterval, 'day').format('YYYY-MM-DD'),
+      history: [],
+      isGraduated: false
     };
-    
-    // 如果是今天复习，强制刷新一下列表（虽然 React 会自动做，但为了保险）
+
+    // 1. 前端立刻显示 (乐观更新)
     setQuestions(prev => [...prev, newQ]);
+
+    // 2. 后端同步保存
+    try {
+      // 调用我们在 server/routes/data.js 里写的 POST /question 接口
+      await api.post('/data/question', newQ);
+      console.log('✅ 新题已同步到云端');
+    } catch (err) {
+      console.error('❌ 保存失败', err);
+      alert('网络错误，刚才添加的题目可能未保存！');
+      // (可选) 失败回滚：setQuestions(prev => prev.filter(q => q.id !== newQ.id));
+    }
   };
 
   // 复习逻辑 (完全重写，支持 0 天)
-  const handleReview = (id, isCorrect) => {
-    setQuestions(prev => prev.map(q => {
-      // 1. 找到当前操作的题目
-      if (q.id !== id) return q;
+  const handleReview = async (id, isCorrect) => { // ★ 加上 async
+    // 1. 先找到当前要操作的题目对象
+    const targetQ = questions.find(q => q.id === id);
+    if (!targetQ) return; // 没找到就不管
 
-      // 2. 获取该题目的规则配置
-      const profile = getProfileById(q.settingId);
-      
-      // 安全获取参数，防止 undefined
-      const gradInterval = parseInt(profile.graduationInterval || 0); // 毕业维保天数
-      const regressStep = parseInt(profile.regressStep || 1);         // 做错倒退步数
-      const tolerance = profile.overdueTolerance === undefined ? 999 : parseInt(profile.overdueTolerance); // 逾期容忍
-      const intervals = profile.intervals;
+    // --- 开始计算新状态 (这一大段逻辑和之前一样，只是提取出来了) ---
+    const profile = getProfileById(targetQ.settingId);
+    const gradInterval = parseInt(profile.graduationInterval || 0);
+    const regressStep = parseInt(profile.regressStep || 1);
+    const tolerance = profile.overdueTolerance === undefined ? 999 : parseInt(profile.overdueTolerance);
+    const intervals = profile.intervals;
 
-      // --- 核心逻辑 A: 计算逾期惩罚 (Effective Streak) ---
-      const today = dayjs();
-      const scheduledDate = dayjs(q.nextReviewDate);
-      
-      // 计算迟到了几天 (今天 - 计划日期)
-      const overdueDays = today.diff(scheduledDate, 'day');
+    // A. 逾期惩罚
+    const today = dayjs();
+    const scheduledDate = dayjs(targetQ.nextReviewDate);
+    const overdueDays = today.diff(scheduledDate, 'day');
+    let effectiveStreak = targetQ.streak;
+    
+    if (!targetQ.isGraduated && overdueDays > tolerance) {
+      effectiveStreak = Math.max(0, effectiveStreak - 1);
+    }
 
-      // 计算"有效等级"：如果非毕业且逾期严重，先扣一级作为惩罚
-      let effectiveStreak = q.streak;
-      
-      if (!q.isGraduated && overdueDays > tolerance) {
-        effectiveStreak = Math.max(0, effectiveStreak - 1);
-        console.log(`题目[${q.content}] 逾期 ${overdueDays} 天，触发惩罚，等级 ${q.streak} -> ${effectiveStreak}`);
-      }
+    // B. 新等级
+    let newStreak = effectiveStreak;
+    if (isCorrect) {
+      newStreak = newStreak + 1;
+    } else {
+      newStreak = Math.max(0, newStreak - regressStep);
+    }
 
-      // --- 核心逻辑 B: 根据对错计算新等级 ---
-      let newStreak = effectiveStreak;
-      
-      if (isCorrect) {
-        newStreak = newStreak + 1; // 做对升级
-      } else {
-        // 做错倒退 (在有效等级的基础上倒退)
-        newStreak = Math.max(0, newStreak - regressStep);
-      }
+    // C. 毕业判断
+    const isNowGraduated = newStreak >= intervals.length;
 
-      // --- 核心逻辑 C: 判断是否毕业 ---
-      // 只要新等级超过了规则数组的长度，就算毕业
-      const isNowGraduated = newStreak >= intervals.length;
+    // D. 日期计算
+    let nextDate = '';
+    if (isNowGraduated) {
+      if (gradInterval > 0) nextDate = today.add(gradInterval, 'day').format('YYYY-MM-DD');
+      else nextDate = '🏁 已毕业';
+    } else {
+      const intervalIndex = Math.min(newStreak, intervals.length - 1);
+      const daysToAdd = intervals[intervalIndex] !== undefined ? intervals[intervalIndex] : 1;
+      nextDate = today.add(daysToAdd, 'day').format('YYYY-MM-DD');
+    }
 
-      // --- 核心逻辑 D: 计算下一次复习日期 ---
-      let nextDate = '';
-      
-      if (isNowGraduated) {
-        // 情况 1: 毕业状态 (刚毕业 或 维保抽查通过)
-        if (gradInterval > 0) {
-          // 开启了维保：安排在 N 天后
-          nextDate = today.add(gradInterval, 'day').format('YYYY-MM-DD');
-        } else {
-          // 没开启维保：永久退休
-          nextDate = '🏁 已毕业';
-        }
-      } else {
-        // 情况 2: 还在学习中 (或者毕业抽查翻车被打回)
-        // 防止数组越界
-        const intervalIndex = Math.min(newStreak, intervals.length - 1);
-        // 获取间隔天数 (如果配置是0，就是0)
-        const daysToAdd = intervals[intervalIndex] !== undefined ? intervals[intervalIndex] : 1;
-        
-        // 基于【今天】往后推 daysToAdd 天
-        nextDate = today.add(daysToAdd, 'day').format('YYYY-MM-DD');
-      }
+    // E. 历史记录
+    let resultType = isCorrect ? 'correct' : 'wrong';
+    if (isNowGraduated && isCorrect) resultType = 'graduated';
 
-      // --- 核心逻辑 E: 记录历史轨迹 ---
-      let resultType = 'correct'; // 默认为绿色
-      if (!isCorrect) {
-        resultType = 'wrong';     // 红色
-      } else if (isNowGraduated) {
-        // 如果这次操作导致了毕业，或者是毕业后的维保成功，都算紫色
-        resultType = 'graduated'; 
-      }
+    const newHistoryRecord = {
+      date: today.format('YYYY-MM-DD'),
+      result: resultType,
+      streakAfter: newStreak
+    };
 
-      const newHistoryRecord = {
-        date: today.format('YYYY-MM-DD'),
-        result: resultType,
-        streakAfter: newStreak
-      };
+    // ★★★ 最终生成的新对象 ★★★
+    const updatedQ = {
+      ...targetQ,
+      streak: newStreak,
+      nextReviewDate: nextDate,
+      isGraduated: isNowGraduated,
+      history: [...(targetQ.history || []), newHistoryRecord]
+    };
 
-      // 返回更新后的题目对象
-      return {
-        ...q,
-        streak: newStreak,          // 更新等级
-        nextReviewDate: nextDate,   // 更新日期
-        isGraduated: isNowGraduated,// 更新毕业状态
-        history: [...(q.history || []), newHistoryRecord] // 追加历史
-      };
-    }));
+    // --- 2. 前端立刻更新 ---
+    setQuestions(prev => prev.map(q => q.id === id ? updatedQ : q));
+
+    // --- 3. 后端同步 ---
+    try {
+      await api.post('/data/question', updatedQ); // 复用保存接口，后端有 ON DUPLICATE KEY UPDATE 逻辑
+    } catch (err) {
+      console.error('❌ 打卡同步失败', err);
+      // 这里的回滚比较麻烦，通常提示用户刷新页面
+    }
   };
 
   // 登录退出
   const login = (userData) => {
     setUser({ ...userData, avatar: '👤' });
   };
-  const logout = () => setUser(null);
+
+  const logout = () => {
+    localStorage.removeItem('token'); // ★ 删掉钥匙
+    localStorage.removeItem('my_app_user'); // 删掉用户信息缓存
+    setUser(null); // 这会触发上面的 useEffect，从而清空 questions
+  };
 
   return (
     <BrowserRouter>
@@ -937,6 +955,8 @@ function ProfilePage({ user, questions, onLogout }) {
 // src/App.jsx -> SettingsPage 组件 (完整版)
 
 function SettingsPage({ settings, setSettings, questions, setQuestions }) {
+  
+  
   const [activeId, setActiveId] = useState(settings.profiles[0].id);
   const activeProfile = settings.profiles.find(p => p.id === activeId) || settings.profiles[0];
   
@@ -1083,8 +1103,28 @@ function SettingsPage({ settings, setSettings, questions, setQuestions }) {
     // 提交所有更改
     setSettings({ ...settings, profiles: updatedProfiles });
     setQuestions(updatedQuestions);
+       // 1. 保存设置
+    api.post('/data/settings', { 
+      profiles: updatedProfiles, 
+      defaultId: settings.defaultId 
+    }).catch(err => alert("设置保存到云端失败！"));
+
+    // 2. 保存那一大堆被日期修正的题目 (如果有的话)
+    // 这是一个优化点：如果 updatedQuestions 很大，一个个发会卡死。
+    // 简单的做法：只对变动的发请求。或者后端提供一个 batchUpdate 接口。
+    // 鉴于目前是个人项目，我们可以循环发送变动的题目 (虽然效率低但稳妥)
+    
+    updatedQuestions.forEach(q => {
+      // 简单判断：如果日期变了，或者规则ID变了，就发请求
+      const oldQ = questions.find(old => old.id === q.id);
+      if (oldQ && (oldQ.nextReviewDate !== q.nextReviewDate || oldQ.settingId !== q.settingId)) {
+        api.post('/data/question', q).catch(console.error);
+      }
+    });
     alert("✅ 规则已更新");
   };
+
+
   const handleSetDefault = () => { setSettings({ ...settings, defaultId: activeId }); };
   
   const handleDelete = () => {
