@@ -6,28 +6,28 @@ import { MoreHorizontal, Check, X, Trash2, Edit2, Calendar as CalIcon , Graduati
 import {Search,Database} from 'lucide-react';
 import { api } from './api';
 
-// --- 默认设置 ---
-const DEFAULT_SETTINGS_DATA = {
-  // 存放所有的规则配置
-  profiles: [
-    { 
-      id: 'default_1', 
-      name: '默认算法', 
-      intervals: [1, 2, 4, 7, 15, 30], 
-      regressStep: 1,
-      graduationInterval: 0 // ★ 新增：0代表永不检查，大于0代表毕业后每隔多少天检查
-    },
-    { 
-      id: 'hard_mode', 
-      name: '魔鬼训练 (包含当日)', 
-      intervals: [0, 0, 1, 3, 7], // 0代表今天立刻再做一次
-      regressStep: 2 ,
-      graduationInterval: 0
-    }
-  ],
-  // 当前默认使用的规则 ID
-  defaultId: 'default_1'
-};
+// // --- 默认设置 ---
+// const DEFAULT_SETTINGS_DATA = {
+//   // 存放所有的规则配置
+//   profiles: [
+//     { 
+//       id: 'default_1', 
+//       name: '默认算法', 
+//       intervals: [1, 2, 4, 7, 15, 30], 
+//       regressStep: 1,
+//       graduationInterval: 0 // ★ 新增：0代表永不检查，大于0代表毕业后每隔多少天检查
+//     },
+//     { 
+//       id: 'hard_mode', 
+//       name: '魔鬼训练 (包含当日)', 
+//       intervals: [0, 0, 1, 3, 7], // 0代表今天立刻再做一次
+//       regressStep: 2 ,
+//       graduationInterval: 0
+//     }
+//   ],
+//   // 当前默认使用的规则 ID
+//   defaultId: 'default_1'
+// };
 
 function App() {
   // 1. 用户状态
@@ -277,7 +277,7 @@ function App() {
 function NavBar({ user }) {
   return (
     <nav className="nav-bar">
-      <div className="logo">MyMemory 🧠</div>
+      <div className="logo">延时记 🧠</div>
       <div className="nav-links">
         {user ? (
           <>
@@ -844,7 +844,7 @@ function ProfilePage({ user, questions, onLogout }) {
             </div>
           </div>
 
-          <h3>🔥 贡献热力图 (模拟)</h3>
+          {/* <h3>🔥 贡献热力图 (模拟)</h3>
           <div style={{
             height: '120px', 
             background: '#f8fafc', 
@@ -856,12 +856,12 @@ function ProfilePage({ user, questions, onLogout }) {
             color: '#94a3b8'
           }}>
             这里未来可以放置类似 GitHub 的打卡热力图
-          </div>
+          </div> */}
 
-          <div style={{marginTop: '30px'}}>
+          {/* <div style={{marginTop: '30px'}}>
              <h3>📥 数据管理</h3>
              <button className="btn-outline">导出所有数据 (JSON)</button>
-          </div>
+          </div> */}
         </div>
 
       </div>

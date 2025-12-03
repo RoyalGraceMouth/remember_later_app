@@ -41,11 +41,47 @@ app.post('/api/register', async (req, res) => {
     // D. 初始化设置：给新用户送一套默认规则 (存入 user_settings 表)
     // 这是一个标准的 JSON 字符串
     const defaultProfiles = [
-      { id: 'default_1', name: '默认算法', intervals: [1, 2, 4, 7, 15, 30], regressStep: 1, graduationInterval: 0 }
+      { 
+        id: 'ebbinghaus', 
+        name: '🧠 艾宾浩斯 (长期记忆)', 
+        intervals: [0, 1, 2, 4, 7, 15, 30, 60], 
+        regressStep: 1, 
+        graduationInterval: 90 
+      },
+      { 
+        id: 'daily_habit', 
+        name: '📅 每日打卡 (天天见)', 
+        intervals: [0], 
+        regressStep: 0, // 错了也不退，反正明天还得见
+        graduationInterval: 1 
+      },
+      { 
+        id: 'exam_week', 
+        name: '🔥 考前高频 (短期突击)', 
+        intervals: [0, 1, 1, 2, 3], 
+        regressStep: 2, // 错了惩罚重一点
+        graduationInterval: 3 
+      },
+      { 
+        id: 'today_only', 
+        name: '⚡️ 仅今日学习 (一次性)', 
+        intervals: [0], 
+        regressStep: 0, 
+        graduationInterval: 0 
+      },
+      { 
+        id: 'tommorow_only', 
+        name: '⚡️ 仅明日学习 (一次性)', 
+        intervals: [1], 
+        regressStep: 0, 
+        graduationInterval: 0 
+      }
     ];
+
+    // 默认选中艾宾浩斯
     await db.query(
       'INSERT INTO user_settings (user_id, profiles, default_id) VALUES (?, ?, ?)', 
-      [userId, JSON.stringify(defaultProfiles), 'default_1']
+      [userId, JSON.stringify(defaultProfiles), 'ebbinghaus']
     );
 
     res.json({ msg: '注册成功，请去登录' });
