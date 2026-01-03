@@ -1,5 +1,5 @@
 // src/api.js
-const BASE_URL = 'http://localhost:3001/api'; // 或者是你的服务器IP /api
+const BASE_URL = '/api'; // 或者是你的服务器IP /api
 
 export const api = {
   // 通用请求处理
